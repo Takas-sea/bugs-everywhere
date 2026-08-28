@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Zen Maru Gothic', 'M PLUS Rounded 1c', sans-serif;
+  }
+}
+
+.font-diary {
+  font-family: 'Kiwi Maru', 'Zen Maru Gothic', sans-serif;
+}
+
+.font-handwriting {
+  font-family: 'Yomogi', 'Kiwi Maru', cursive;
+}
+
+.font-title {
+  font-family: 'Zen Maru Gothic', 'M PLUS Rounded 1c', sans-serif;
+}
+
+/* Notebook lined background */
+.bg-diary-grid {
+  background-size: 24px 24px;
+  background-image: 
+    linear-gradient(to right, rgba(235, 115, 60, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.05) 1px, transparent 1px);
+}
+
+.bg-diary-dots {
+  background-size: 20px 20px;
+  background-image: radial-gradient(circle, rgba(148, 163, 184, 0.25) 1px, transparent 1px);
+}
+
+/* Subtle watercolor edge/stamp effects */
+.stamp-shadow {
+  box-shadow: 0 4px 20px -2px rgba(234, 88, 12, 0.12), 0 2px 6px -1px rgba(14, 165, 233, 0.08);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "TABI MEMORY",
+  "description": "旅行写真の撮影時間・位置情報・内容から、AIがみんなの思い出を時系列に整理した写真日記を自動生成するWebアプリ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
