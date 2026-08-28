@@ -18,7 +18,7 @@ AIは訪れた場所や移動から旅行中の出来事をストーリー化し
 | --- | --- |
 | フロントエンド | Typescript・HTML・CSS |
 | バックエンド | supabase・Python |
-| その他 |  |
+| その他 | Gemini API |
 
 ## 動かし方
 \`\`\`bash
