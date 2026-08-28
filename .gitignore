@@ -88,3 +88,8 @@ Thumbs.db
 *.log
 *.tmp
 *.temp
+.env
+.env.local
+.env.*.local
+
+!.env.local.example
