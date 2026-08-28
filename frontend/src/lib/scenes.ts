@@ -26,8 +26,15 @@ export async function saveScenes(
 
   // 作り直しに強くするため、その旅行の既存シーンは消してから入れる
   // （panels は scene_id の on delete cascade で一緒に消える）
+  // scenes の DELETE ポリシーが必要な箇所はここだけです。
+  // 閾値を変えてシーン分割をやり直す操作で使います。
   const { error: delErr } = await supabase.from("scenes").delete().eq("trip_id", tripId);
-  if (delErr) throw new Error(`古いシーンの削除に失敗しました: ${delErr.message}`);
+  if (delErr) {
+    throw new Error(
+      `古いシーンの削除に失敗しました: ${delErr.message}\n` +
+        "scenes に anon の DELETE ポリシーが設定されているか確認してください。",
+    );
+  }
 
   const { data: sceneRows, error } = await supabase
     .from("scenes")

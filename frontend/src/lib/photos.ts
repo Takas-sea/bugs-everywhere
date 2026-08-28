@@ -80,8 +80,14 @@ export async function uploadPhoto(file: File, tripId: string): Promise<PhotoRow>
     .single();
 
   if (error) {
-    // DB に入らなかった画像は残さない
-    await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    // DB に入らなかった画像は消しておきたいが、バケットは Private で
+    // anon に DELETE 権限が無い運用なので、失敗しても無視する。
+    // （使われない画像がまれに残るだけで、実害はない）
+    try {
+      await supabase.storage.from(PHOTO_BUCKET).remove([path]);
+    } catch {
+      /* 権限が無い場合はそのまま */
+    }
     throw new Error(`写真の登録に失敗しました: ${error.message}`);
   }
   return data as PhotoRow;
@@ -130,7 +136,44 @@ export async function listPhotos(tripId: string): Promise<PhotoRow[]> {
   return (data ?? []) as PhotoRow[];
 }
 
-/** Storage のパスから、img タグに渡せる URL を作る（バケットは Public 前提） */
-export function photoUrl(storagePath: string): string {
-  return supabase.storage.from(PHOTO_BUCKET).getPublicUrl(storagePath).data.publicUrl;
+/**
+ * Storage のパスから、img タグに渡せる URL を作る。
+ *
+ * バケットは Private なので、公開URLではなく期限つきの署名URLを発行します。
+ * 期限が切れると画像が表示されなくなるので、画面を開いたときに取り直してください。
+ */
+export async function photoUrl(
+  storagePath: string,
+  expiresInSeconds = 60 * 60,
+): Promise<string> {
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(storagePath, expiresInSeconds);
+
+  if (error || !data) throw new Error(`画像URLの発行に失敗しました: ${error?.message}`);
+  return data.signedUrl;
+}
+
+/**
+ * 複数枚ぶんの署名URLをまとめて発行する。
+ * 1枚ずつ呼ぶとリクエストが枚数ぶん飛ぶので、一覧表示ではこちらを使うこと。
+ * 返るのは storage_path をキーにした対応表です。
+ */
+export async function photoUrls(
+  storagePaths: string[],
+  expiresInSeconds = 60 * 60,
+): Promise<Record<string, string>> {
+  if (storagePaths.length === 0) return {};
+
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(storagePaths, expiresInSeconds);
+
+  if (error || !data) throw new Error(`画像URLの発行に失敗しました: ${error?.message}`);
+
+  const map: Record<string, string> = {};
+  for (const item of data) {
+    if (item.signedUrl && item.path) map[item.path] = item.signedUrl;
+  }
+  return map;
 }
