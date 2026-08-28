@@ -29,7 +29,7 @@ AIは訪れた場所や移動から旅行中の出来事をストーリー化し
 | --- | --- | -- |
 | バックエンド | 鷹栖拓海 | https://github.com/Takas-sea |
 | バックエンド | 平松勇人 | https://github.com/Takas-sea |
-|  |  | @ |
+| バックエンド |　和平彩愛　| https://github.com/wapira |
 
 ---
 関西ビギナーズハッカソン vol.8 (2026/08/28-30)
