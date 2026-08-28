@@ -28,6 +28,7 @@ AIは訪れた場所や移動から旅行中の出来事をストーリー化し
 | 役割 | 名前 | GitHub |
 | --- | --- | -- |
 | バックエンド | 鷹栖拓海 | https://github.com/Takas-sea |
+| バックエンド | 平松勇人 | https://github.com/Takas-sea |
 |  |  | @ |
 
 ---
