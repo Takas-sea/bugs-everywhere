@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
- Download, UserPlus, Heart, Bookmark, ArrowLeft,
+ UserPlus, Heart, ArrowLeft,
  Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check,
  MessageCircle, Send, Plus, Flame, Sparkle, Printer
 } from 'lucide-react';
@@ -728,36 +728,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
  </section>
  )}
-
- {/* Bottom Print / Save Action Bar */}
- <div className="mt-10 p-6 rounded-3xl bg-blue-700 text-white shadow-lg shadow-blue-500/20 flex flex-col sm:flex-row items-center justify-between gap-4">
- <div>
- <h3 className="text-lg font-bold flex items-center gap-2">
- <Bookmark className="w-5 h-5" />
- <span>この写真日記を保存・共有</span>
- </h3>
- <p className="text-xs text-white/90 mt-0.5">
- PDF形式でのダウンロードや、友達への共有リンクを発行できます
- </p>
- </div>
-
- <div className="flex items-center gap-3 w-full sm:w-auto">
- <button
- onClick={() => window.print()}
- className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-white text-blue-600 font-bold text-xs shadow-md hover:bg-blue-50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
- >
- <Download className="w-3.5 h-3.5" />
- <span>PDFで保存 / 印刷</span>
- </button>
- <button
- onClick={handleShare}
- className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-blue-700/60 hover:bg-blue-700 text-white font-bold text-xs backdrop-blur-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-white/30"
- >
- <Share2 className="w-3.5 h-3.5" />
- <span>{copiedLink ? 'コピー完了！' : '共有リンク'}</span>
- </button>
- </div>
- </div>
  </div>
  );
 };
