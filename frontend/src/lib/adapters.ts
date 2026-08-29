@@ -273,6 +273,34 @@ export async function toMapSpots(
 //  Trip をまるごと組み立てる
 // ================================================================
 
+/**
+ * その旅の「市」を返す。「大阪市・道頓堀」の前半だけを取り出します。
+ *
+ * 地名は「市区町村・町名」または「市区町村・ランドマーク名」の形で入っています。
+ * 表紙の副題は広い粒度のほうが自然なので、市までに落とします。
+ * 一番多く出てくる市を採用するので、少し移動していても引っぱられません。
+ */
+function cityOf(photos: PhotoRow[]): string {
+  const counts = new Map<string, number>();
+
+  for (const p of photos) {
+    if (!p.location_name) continue;
+    const city = p.location_name.split("・")[0].trim();
+    if (!city) continue;
+    counts.set(city, (counts.get(city) ?? 0) + 1);
+  }
+
+  let best = "";
+  let bestCount = 0;
+  for (const [city, n] of counts) {
+    if (n > bestCount) {
+      best = city;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
 /** 写真の撮影日のうち、枚数が一番多い日を返す */
 function mainDateOf(photos: PhotoRow[], fallbackIso: string): string {
   const counts = new Map<string, number>();
@@ -350,7 +378,7 @@ export async function loadTrip(
 
   const coverImage = entries.find((e) => e.photoUrl)?.photoUrl ?? "";
   const title = trip.title ?? "旅の記録";
-  const destination = spots[0]?.name ?? "";
+  const destination = cityOf(photos);
   // 一番多く写っている日を「その旅の日」にします。
   // 一番古い写真をそのまま使うと、混ざった1枚に引っぱられます。
   const date = mainDateOf(photos, trip.created_at);
