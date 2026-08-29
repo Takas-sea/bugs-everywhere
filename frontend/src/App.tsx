@@ -145,6 +145,31 @@ export default function App() {
   }, []);
 
   // =========================
+  // 共有URL（?trip=...）で開かれたとき
+  // =========================
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('trip');
+    if (!id || !UUID_RE.test(id)) return;
+
+    setRealTripId(id);
+
+    loadTrip(id)
+      .then((trip) => {
+        setSelectedTrip(trip);
+        setPastTrips((prev) => [
+          trip,
+          ...prev.filter((t) => t.id !== trip.id),
+        ]);
+        setActiveScreen('diary');
+      })
+      .catch((e) => {
+        console.error('[共有URL]', e);
+        setLoadError('共有された日記が見つかりませんでした');
+      });
+  }, []);
+
+  // =========================
   // この端末で作った旅行を読み込む
   // =========================
 
@@ -425,6 +450,11 @@ export default function App() {
         onClose={() => setIsInviteModalOpen(false)}
         tripTitle={selectedTrip?.title || '旅の記録'}
         members={selectedTrip?.members || SAMPLE_MEMBERS}
+        tripId={
+          selectedTrip && UUID_RE.test(selectedTrip.id)
+            ? selectedTrip.id
+            : realTripId ?? undefined
+        }
       />
 
       <PhotoLightbox

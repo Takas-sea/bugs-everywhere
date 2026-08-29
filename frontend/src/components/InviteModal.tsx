@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, QrCode, Users, Sparkles, Send, Share2 } from 'lucide-react';
+import { X, Copy, Check, Users, Sparkles, Send, Share2 } from 'lucide-react';
 import { Contributor } from '../types';
 
 interface InviteModalProps {
@@ -7,6 +7,8 @@ interface InviteModalProps {
   onClose: () => void;
   tripTitle: string;
   members: Contributor[];
+  /** 共有する日記のID。無いときはURLを出しません */
+  tripId?: string;
 }
 
 export const InviteModal: React.FC<InviteModalProps> = ({
@@ -14,15 +16,21 @@ export const InviteModal: React.FC<InviteModalProps> = ({
   onClose,
   tripTitle,
   members,
+  tripId,
 }) => {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<'link' | 'qr'>('link');
-  const inviteCode = 'TABI-KYOTO-2026';
-  const inviteUrl = `https://tabi-memory.app/join/${inviteCode}`;
+  /**
+   * この日記を開くURL。共有された人が開くと、その日記が直接開きます。
+   * まだ旅行が作られていない（写真を1枚も上げていない）ときは空です。
+   */
+  const inviteUrl = tripId
+    ? `${window.location.origin}${window.location.pathname}?trip=${tripId}`
+    : '';
 
   if (!isOpen) return null;
 
   const handleCopy = () => {
+    if (!inviteUrl) return;
     navigator.clipboard?.writeText(inviteUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -52,26 +60,6 @@ export const InviteModal: React.FC<InviteModalProps> = ({
           </p>
         </div>
 
-        {/* Switch tab for Link vs QR */}
-        <div className="flex bg-slate-100 p-1 rounded-2xl mb-5 text-xs font-bold">
-          <button
-            onClick={() => setActiveTab('link')}
-            className={`flex-1 py-2 rounded-xl transition-all ${
-              activeTab === 'link' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            招待リンク
-          </button>
-          <button
-            onClick={() => setActiveTab('qr')}
-            className={`flex-1 py-2 rounded-xl transition-all ${
-              activeTab === 'qr' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            QRコード
-          </button>
-        </div>
-
         {/* Current Members Preview */}
         <div className="mb-5">
           <label className="text-xs font-bold text-slate-700 block mb-2">
@@ -95,8 +83,8 @@ export const InviteModal: React.FC<InviteModalProps> = ({
           </div>
         </div>
 
-        {/* Tab 1: Invite Link */}
-        {activeTab === 'link' ? (
+        {/* 招待リンク */}
+        <>
           <div className="space-y-4">
             <div>
               <label className="text-xs font-bold text-slate-700 block mb-1">
@@ -106,11 +94,12 @@ export const InviteModal: React.FC<InviteModalProps> = ({
                 <input
                   type="text"
                   readOnly
-                  value={inviteUrl}
+                  value={inviteUrl || '写真を1枚アップロードすると、共有URLが作られます'}
                   className="flex-1 text-xs px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-mono select-all focus:outline-none"
                 />
                 <button
                   onClick={handleCopy}
+                  disabled={!inviteUrl}
                   id="copy-invite-link-btn"
                   className="px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs shrink-0"
                 >
@@ -128,27 +117,7 @@ export const InviteModal: React.FC<InviteModalProps> = ({
               招待された友達がアップロードした写真も自動で時系列に統合され、メンバー全員の思い出が1冊の写真日記にまとまります。
             </div>
           </div>
-        ) : (
-          /* Tab 2: QR Code view */
-          <div className="text-center py-2 space-y-3">
-            <div className="w-44 h-44 mx-auto p-3 bg-white rounded-2xl border-2 border-dashed border-sky-300 flex flex-col items-center justify-center shadow-inner">
-              {/* Styled mock QR grid */}
-              <div className="w-full h-full bg-slate-900 rounded-lg p-2 flex flex-col justify-between items-center text-white">
-                <div className="grid grid-cols-5 gap-1.5 w-full h-full p-2 bg-white rounded">
-                  {Array.from({ length: 25 }).map((_, i) => (
-                    <div 
-                      key={i} 
-                      className={`rounded-xs ${i % 2 === 0 || i % 7 === 0 || i === 0 || i === 4 || i === 20 || i === 24 ? 'bg-slate-900' : 'bg-transparent'}`} 
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 font-diary">
-              近くにいる友達のスマホカメラでスキャンしてもらえます
-            </p>
-          </div>
-        )}
+        </>
 
         <button
           onClick={onClose}
