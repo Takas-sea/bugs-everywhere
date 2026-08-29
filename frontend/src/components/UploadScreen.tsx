@@ -6,6 +6,7 @@ import {
 import { PhotoItem, Trip } from '../types';
 import { createTrip, uploadPhotos } from '../lib/photos';
 import { prepareScenes } from '../lib/scenes';
+import { renameTrip } from '../lib/trips';
 import { loadPhotoItems } from '../lib/adapters';
 
 interface UploadScreenProps {
@@ -18,6 +19,39 @@ interface UploadScreenProps {
 
 /** モックの旅行IDと本物のUUIDを見分ける */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 写真の撮影日のうち、枚数が一番多い日を「その旅の日」として返す。
+ *
+ * 一番古い写真をそのまま使うと、混ざった1枚に引っぱられます。
+ */
+function mainDateLabel(items: PhotoItem[]): string {
+  const counts = new Map<string, number>();
+
+  for (const p of items) {
+    if (!p.timestamp) continue;
+    const d = new Date(p.timestamp);
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  let best = '';
+  let bestCount = 0;
+  for (const [key, n] of counts) {
+    // 同数なら新しい日を採用する
+    if (n > bestCount || (n === bestCount && key > best)) {
+      best = key;
+      bestCount = n;
+    }
+  }
+
+  const now = new Date();
+  const [y, m, d] = best
+    ? best.split('-').map(Number)
+    : [now.getFullYear(), now.getMonth() + 1, now.getDate()];
+
+  return `${y}年${m}月${d}日`;
+}
 
 export const UploadScreen: React.FC<UploadScreenProps> = ({
   currentTrip,
@@ -34,6 +68,9 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
   const [noExifCount, setNoExifCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const creatingRef = useRef<Promise<string> | null>(null);
+  /** この画面で新しく作った旅行か。名前を勝手に付け替えていいかの判断に使います */
+  const createdHereRef = useRef(false);
+  const [tripTitle, setTripTitle] = useState(currentTrip.title);
 
   // 既存の旅行に写真を追加しに来た場合だけ、その旅行IDを引き継ぎます。
   useEffect(() => {
@@ -56,6 +93,8 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
 
     const promise = createTrip(title).then((trip) => {
       setTripId(trip.id);
+      createdHereRef.current = true;
+      setTripTitle(title);
       return trip.id;
     });
     creatingRef.current = promise;
@@ -71,7 +110,23 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
     const items = await loadPhotoItems(id);
     setPhotos(items);
     setNoExifCount(items.filter((p) => p.timestamp === 0).length);
-  }, []);
+
+    // 旅行を作った時点では写真がまだ無いので、名前は「今日」の日付になっています。
+    // 写真が入ったら、撮影日のほうへ付け替えます。
+    // 自分でこの画面から作った旅行のときだけ触ります。
+    if (!createdHereRef.current || items.length === 0) return;
+
+    const title = `${mainDateLabel(items)}の記録`;
+    if (title === tripTitle) return;
+
+    try {
+      await renameTrip(id, title);
+      setTripTitle(title);
+    } catch (e) {
+      // 名前が変わらないだけなので、アップロードは止めません
+      console.warn('[UploadScreen] 旅行名の更新に失敗しました', e);
+    }
+  }, [tripTitle]);
 
   // 旅行が決まったら、すでに入っている写真を読み込む（追加アップロード時に効きます）
   useEffect(() => {
@@ -147,7 +202,7 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
               <span>旅行メンバーと共同アルバム</span>
             </div>
             <h2 className="text-xl font-bold font-title text-slate-800">
-              {currentTrip.title}
+              {tripTitle}
             </h2>
             <p className="text-xs text-slate-500 font-diary mt-0.5">
               撮影時刻と位置情報をもとに、AIが一日を時系列に整理します。
