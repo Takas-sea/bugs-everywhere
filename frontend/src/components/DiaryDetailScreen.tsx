@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { 
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
- Download, UserPlus, Heart, Bookmark, ArrowLeft,
+ UserPlus, Heart, ArrowLeft,
  Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check,
- MessageCircle, Send, Plus, Flame, Sparkle
+ MessageCircle, Send, Plus, Flame, Sparkle, Printer
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
 import { renameTrip } from '../lib/trips';
+import { updateScenePlace } from '../lib/scenes';
 
 interface DiaryDetailScreenProps {
  trip: Trip;
@@ -14,6 +15,8 @@ interface DiaryDetailScreenProps {
  onOpenInviteModal: () => void;
  onSelectPhotoLightbox: (photoUrl: string, caption?: string, spotName?: string) => void;
  onUploadMorePhotos?: () => void;
+ /** 一日の流れを1枚にまとめた表示へ */
+ onExportPoster?: () => void;
 }
 
 export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
@@ -22,6 +25,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  onOpenInviteModal,
  onSelectPhotoLightbox,
  onUploadMorePhotos,
+ onExportPoster,
 }) => {
  const [trip, setTrip] = useState<Trip>(initialTrip);
  const [activeTab, setActiveTab] = useState<DiaryTab>('diary');
@@ -43,6 +47,36 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  /* ギャラリーは、コマではなく実際にアップロードされた写真を並べます。
     コマの画像は生成された絵なので、写真として数えると合いません。 */
  const galleryPhotos = trip.photoItems ?? [];
+
+ /* コマの場所名の編集 */
+ const [placeEditingId, setPlaceEditingId] = useState<string | null>(null);
+ const [placeDraft, setPlaceDraft] = useState('');
+ const [placeError, setPlaceError] = useState<string | null>(null);
+
+ const startPlaceEdit = (entry: DiaryEntry) => {
+   setPlaceEditingId(entry.id);
+   setPlaceDraft(entry.location);
+   setPlaceError(null);
+ };
+
+ const savePlace = async (entry: DiaryEntry) => {
+   if (!entry.sceneId) { setPlaceEditingId(null); return; }
+   const next = placeDraft.trim();
+   if (next === entry.location) { setPlaceEditingId(null); return; }
+   try {
+     await updateScenePlace(entry.sceneId, next);
+     setTrip((prev) => ({
+       ...prev,
+       entries: prev.entries.map((e) =>
+         e.id === entry.id ? { ...e, location: next } : e
+       ),
+     }));
+     setPlaceEditingId(null);
+     setPlaceError(null);
+   } catch (e) {
+     setPlaceError(String(e));
+   }
+ };
 
  const handleRename = async () => {
    const next = titleDraft.trim();
@@ -162,6 +196,18 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <Plus className="w-3.5 h-3.5" />
  <span>写真を追加</span>
  </button>
+ )}
+
+ {onExportPoster && (
+   <button
+     onClick={onExportPoster}
+     id="export-poster-btn"
+     className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer flex items-center gap-1.5"
+     title="一日の流れを1枚にまとめる"
+   >
+     <Printer className="w-3.5 h-3.5 text-blue-600" />
+     <span>1枚にまとめる</span>
+   </button>
  )}
 
  {/* Share Button */}
@@ -356,6 +402,10 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  
 
  {/* 6. AI写真日記：時系列タイムライン (The Core Photo Diary Timeline) */}
+ {placeError && (
+ <p className="mb-4 text-[11px] text-rose-600">{placeError}</p>
+ )}
+
  <section className="relative pl-6 sm:pl-10 space-y-8 sm:space-y-12 before:absolute before:left-3 sm:before:left-5 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-blue-500 before:to-blue-600">
  {displayedEntries.map((entry, index) => {
  const isEditing = editingEntryId === entry.id;
@@ -380,9 +430,44 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <Clock className="w-3 h-3 text-blue-600" />
  {entry.time}
  </span>
- <h3 className="text-base sm:text-xl font-bold text-slate-800">
- {entry.location}
- </h3>
+ {placeEditingId === entry.id ? (
+   <span className="flex items-center gap-1.5">
+     <input
+       autoFocus
+       value={placeDraft}
+       onChange={(ev) => setPlaceDraft(ev.target.value)}
+       onKeyDown={(ev) => {
+         if (ev.key === "Enter") void savePlace(entry);
+         if (ev.key === "Escape") setPlaceEditingId(null);
+       }}
+       placeholder="場所の名前"
+       className="px-2.5 py-1 rounded-lg border border-blue-300 text-base font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-400"
+     />
+     <button
+       onClick={() => void savePlace(entry)}
+       className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold cursor-pointer"
+     >
+       保存
+     </button>
+     <button
+       onClick={() => setPlaceEditingId(null)}
+       className="px-2 py-1 rounded-lg text-[11px] font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
+     >
+       やめる
+     </button>
+   </span>
+ ) : (
+   <button
+     onClick={() => startPlaceEdit(entry)}
+     title="場所の名前を直す"
+     className="group/place flex items-center gap-1.5 cursor-pointer text-left"
+   >
+     <h3 className="text-base sm:text-xl font-bold text-slate-800">
+       {entry.location || '場所を入れる'}
+     </h3>
+     <Edit3 className="w-3.5 h-3.5 text-slate-300 group-hover/place:text-blue-600 transition-colors" />
+   </button>
+ )}
  {entry.feeling && (
  <span className="text-xs px-2.5 py-0.5 rounded-md bg-blue-50 text-blue-700 font-medium">
  #{entry.feeling}
@@ -643,36 +728,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
  </section>
  )}
-
- {/* Bottom Print / Save Action Bar */}
- <div className="mt-10 p-6 rounded-3xl bg-blue-700 text-white shadow-lg shadow-blue-500/20 flex flex-col sm:flex-row items-center justify-between gap-4">
- <div>
- <h3 className="text-lg font-bold flex items-center gap-2">
- <Bookmark className="w-5 h-5" />
- <span>この写真日記を保存・共有</span>
- </h3>
- <p className="text-xs text-white/90 mt-0.5">
- PDF形式でのダウンロードや、友達への共有リンクを発行できます
- </p>
- </div>
-
- <div className="flex items-center gap-3 w-full sm:w-auto">
- <button
- onClick={() => window.print()}
- className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-white text-blue-600 font-bold text-xs shadow-md hover:bg-blue-50 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
- >
- <Download className="w-3.5 h-3.5" />
- <span>PDFで保存 / 印刷</span>
- </button>
- <button
- onClick={handleShare}
- className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-blue-700/60 hover:bg-blue-700 text-white font-bold text-xs backdrop-blur-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer border border-white/30"
- >
- <Share2 className="w-3.5 h-3.5" />
- <span>{copiedLink ? 'コピー完了！' : '共有リンク'}</span>
- </button>
- </div>
- </div>
  </div>
  );
 };

@@ -26,6 +26,8 @@ export interface PhotoItem {
 export interface DiaryEntry {
   id: string;
   photoId: string;
+  /** どのコマ（scenes の行）かを表すID。場所名の編集に使います */
+  sceneId?: string;
   time: string;
   title: string;
   location: string;
@@ -101,6 +103,6 @@ export interface Trip {
 
 export type ActiveScreen =
   | 'home' | 'create_trip' | 'upload' | 'generating'
-  | 'diary' | 'memories' | 'map' | 'profile';
+  | 'diary' | 'memories' | 'map' | 'profile' | 'poster';
 
 export type DiaryTab = 'photos' | 'diary' | 'members' | 'map';

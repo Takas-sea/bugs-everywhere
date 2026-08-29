@@ -1,5 +1,6 @@
 import { supabase, PHOTO_BUCKET } from "./supabase.ts";
 import { readExif } from "./exif.ts";
+import { reverseGeocodeName } from "./geocode.ts";
 import type { PhotoRow, TripRow } from "./types.ts";
 
 // ---------------------------------------------------------------- 匿名ID
@@ -60,12 +61,24 @@ function extensionOf(file: File): string {
 export async function uploadPhoto(file: File, tripId: string): Promise<PhotoRow> {
   const exif = await readExif(file);
 
+  // 地名は画像のアップロードと同時に引きます。地名の取得は1秒に1回までなので、
+  // 順番にやると待ち時間が積み上がります。失敗しても写真の登録は止めません。
+  const placePromise =
+    exif.latitude !== null && exif.longitude !== null
+      ? reverseGeocodeName(exif.latitude, exif.longitude).catch((e) => {
+          console.warn("[uploadPhoto] 地名の取得に失敗しました", e);
+          return null;
+        })
+      : Promise.resolve(null);
+
   const path = `${tripId}/${crypto.randomUUID()}.${extensionOf(file)}`;
   const { error: upErr } = await supabase.storage
     .from(PHOTO_BUCKET)
     .upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
 
   if (upErr) throw new Error(`画像のアップロードに失敗しました: ${upErr.message}`);
+
+  const locationName = await placePromise;
 
   const { data, error } = await supabase
     .from("photos")
@@ -75,6 +88,7 @@ export async function uploadPhoto(file: File, tripId: string): Promise<PhotoRow>
       captured_at: exif.capturedAt ? exif.capturedAt.toISOString() : null,
       latitude: exif.latitude,
       longitude: exif.longitude,
+      location_name: locationName,
     })
     .select()
     .single();
