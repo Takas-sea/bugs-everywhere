@@ -15,6 +15,7 @@ from app.services.supabase import (
     query_photo_rows_by_day,
     resolve_trip_ids_by_owner_token,
     supabase,
+    update_photo_metadata,
 )
 
 router = APIRouter()
@@ -34,17 +35,49 @@ async def upload_image(
 ):
     try:
         data = await file.read()
-        storage_path = f"{owner_token}/{date}/{file.filename}"
-        supabase.storage.from_("photos").upload(storage_path, data, file_options={"content-type": file.content_type})
+        original_filename = file.filename or "upload.jpg"
+        storage_path = f"{owner_token}/{date}/{original_filename}"
+        try:
+            supabase.storage.from_("photos").upload(
+                storage_path,
+                data,
+                file_options={"content-type": file.content_type or "application/octet-stream"},
+            )
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "duplicate" not in msg and "already exists" not in msg and "409" not in msg:
+                raise
+            unique_suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+            storage_path = f"{owner_token}/{date}/{unique_suffix}_{original_filename}"
+            supabase.storage.from_("photos").upload(
+                storage_path,
+                data,
+                file_options={"content-type": file.content_type or "application/octet-stream"},
+            )
 
         metadata = {
             "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "storage_path": storage_path,
-            "original_filename": file.filename,
-            "content_type": file.content_type,
+            "original_filename": original_filename,
+            "content_type": file.content_type or "application/octet-stream",
         }
 
-        insert_photo_metadata(owner_token, metadata, client=supabase)
+        inserted_row = insert_photo_metadata(owner_token, metadata, client=supabase)
+        photo_id = inserted_row.get("id") if isinstance(inserted_row, dict) else None
+
+        try:
+            analysis = analyze_images([data], image_names=[storage_path])
+            if photo_id:
+                update_photo_metadata(
+                    photo_id=photo_id,
+                    metadata={
+                        "summary": analysis.get("summary"),
+                        "events": analysis.get("events") or [],
+                    },
+                    client=supabase,
+                )
+        except Exception:
+            analysis = None
 
         for trip_id in resolve_trip_ids_by_owner_token(owner_token, client=supabase):
             fill_gap_scenes_for_trip(trip_id)
@@ -56,6 +89,8 @@ async def upload_image(
             "storage_path": storage_path,
             "filename": file.filename,
             "size": len(data),
+            "summary": (analysis or {}).get("summary"),
+            "events": (analysis or {}).get("events") or [],
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

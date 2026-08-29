@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import io
 import json
@@ -7,18 +8,66 @@ import time
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import types as genai_types
 
 load_dotenv()
 
-_api_key = os.getenv("GEMINI_API_KEY")
-_model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+_model_name = os.getenv("GEMINI_CHAT_MODEL", "gemini-3.6-flash")
+_image_model_name = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.6-flash")
 client = None
 if _api_key:
     try:
         client = genai.Client(api_key=_api_key)
     except Exception:
         client = None
+
+
+def _extract_generated_image_bytes(response) -> bytes | None:
+    if response is None:
+        return None
+
+    candidates = getattr(response, "candidates", None) or []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data is not None:
+                payload = getattr(inline_data, "data", None)
+                if isinstance(payload, (bytes, bytearray)):
+                    return bytes(payload)
+                if isinstance(payload, str):
+                    try:
+                        return base64.b64decode(payload)
+                    except Exception:
+                        return payload.encode("utf-8")
+
+            image = getattr(part, "image", None)
+            if image is not None:
+                payload = getattr(image, "image_bytes", None)
+                if payload:
+                    return bytes(payload)
+                payload = getattr(image, "data", None)
+                if isinstance(payload, (bytes, bytearray)):
+                    return bytes(payload)
+                if isinstance(payload, str):
+                    try:
+                        return base64.b64decode(payload)
+                    except Exception:
+                        return payload.encode("utf-8")
+
+    if hasattr(response, "inline_data"):
+        payload = getattr(response.inline_data, "data", None)
+        if isinstance(payload, (bytes, bytearray)):
+            return bytes(payload)
+        if isinstance(payload, str):
+            try:
+                return base64.b64decode(payload)
+            except Exception:
+                return payload.encode("utf-8")
+
+    return None
 
 
 def _mime_type_from_name(name: str | None) -> str:
@@ -77,23 +126,6 @@ def _parse_json_response(text: str) -> dict:
     return parsed
 
 
-def _build_diary_prompt(summary: str, events: list[str] | None = None) -> str:
-    event_text = "\n".join(f"- {event}" for event in (events or []))
-    if event_text:
-        event_text = f"\n関連イベント:\n{event_text}\n"
-    return f"""
-    あなたは旅行の絵日記を描くイラストレーターです。
-    以下の1日の要約をもとに、旅行の情景を一枚の美しいイラストとして生成してください。
-    - 1日の要約: {summary}
-    {event_text}
-    画像は、旅行の思い出を温かく、鮮やかで、印象的に表現してください。
-    風景、人物、季節感、空気感が自然に感じられる構図にしてください。
-    その日の雰囲気が伝わる表現にしてください。
-    さらに、前景と遠景の層をはっきりさせ、空の明るさと光の変化、地面の質感、人物や建物の輪郭がはっきり見えるようにしてください。
-    画面全体に視線が自然に集まり、旅の余韻が感じられる温かい雰囲気を大事にしてください。
-    """.strip()
-
-
 def write_gap_text(before_summary: str | None, after_summary: str | None) -> str:
     before = before_summary or "前の時間の雰囲気"
     after = after_summary or "次の時間の雰囲気"
@@ -110,128 +142,193 @@ def generate_image(summary: str, events: list[str] | None = None) -> bytes:
     return generate_diary_illustration(summary=summary, events=events)
 
 
+def _infer_scene_theme(summary: str) -> str:
+    text = (summary or "").lower()
+    indicators = {
+        "temple": ["寺", "神社", "仏閣", "境内", "参拝", "門", "鳥居", "大仏", "境内"],
+        "beach": ["海", "海辺", "浜辺", "波", "サーフ", "砂浜", "海岸", "夕日", "潮"],
+        "city": ["駅", "街", "都市", "夜景", "ビル", "百貨店", "商店", "港町", "都会"],
+        "mountain": ["山", "登山", "渓谷", "尾根", "高原", "峠", "山道", "森", "森林"],
+        "village": ["村", "田舎", "集落", "農家", "田んぼ", "畑", "古い町", "小さな街"],
+        "cafe": ["カフェ", "喫茶", "ランチ", "食事", "朝ごはん", "レストラン", "店", "屋台", "テラス"],
+    }
+    scores = {name: 0 for name in indicators}
+    for name, keywords in indicators.items():
+        for keyword in keywords:
+            if keyword in text:
+                scores[name] += 2
+    if not any(scores.values()):
+        return "travel"
+    return max(scores, key=scores.get)
+
+
 def generate_diary_illustration(summary: str, events: list[str] | None = None) -> bytes:
     if not summary:
         raise ValueError("A diary summary is required to generate an illustration.")
 
+    prompt = (
+        "あなたは旅行の絵日記を描くイラストレーターです。 "
+        "以下の要約を元に、1枚の自然で温かい旅の風景のイラストを作成してください。 "
+        f"- 1日の要約: {summary} "
+        + (f"関連イベント: {', '.join(events or [])}." if events else "")
+        + " 背景は深みのある自然の景色にし、前景に人物や建物の輪郭がはっきり見えるようにしてください。 "
+        "見た目は美しい旅行の記憶として、色味と構図が安定していて、印象に残る表現にしてください。"
+    )
+
+    if client is not None:
+        try:
+            response = client.models.generate_content(
+                model=_image_model_name,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(response_modalities=["TEXT", "IMAGE"]),
+            )
+            image_bytes = _extract_generated_image_bytes(response)
+            if image_bytes:
+                return image_bytes
+        except Exception:
+            pass
+
     try:
-        from PIL import Image, ImageDraw, ImageFilter
+        from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
     except Exception as exc:
         raise RuntimeError("Pillow is required to generate diary illustrations.") from exc
 
-    normalized = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥]+", " ", summary)
-    token_values = [ord(ch) for ch in normalized if ch.strip()]
+    theme = _infer_scene_theme(summary)
     seed = int(hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8], 16)
-    mood_seed = sum(token_values) % 7
-    sky_top = [
-        (15, 26, 55),
-        (145, 120, 180),
-        (150, 190, 220),
-        (120, 140, 160),
-        (80, 110, 150),
-        (160, 170, 210),
-        (120, 95, 140),
-    ][mood_seed % 7]
-    sky_bottom = [
-        (53, 78, 123),
-        (255, 181, 112),
-        (255, 198, 166),
-        (188, 154, 120),
-        (120, 145, 170),
-        (224, 204, 180),
-        (200, 155, 135),
-    ][mood_seed % 7]
 
+    palettes = {
+        "temple": {"sky_top": (18, 28, 42), "sky_bottom": (124, 170, 188), "ground": (132, 116, 90), "hill": (154, 170, 122), "hill2": (119, 145, 111), "path": (189, 160, 125), "roof": (146, 103, 76), "building": (182, 167, 146)},
+        "beach": {"sky_top": (12, 29, 52), "sky_bottom": (255, 175, 118), "ground": (150, 177, 127), "hill": (95, 146, 127), "hill2": (65, 119, 126), "path": (214, 181, 118), "roof": (77, 106, 137), "building": (123, 164, 196)},
+        "city": {"sky_top": (18, 24, 45), "sky_bottom": (120, 127, 180), "ground": (83, 101, 109), "hill": (98, 110, 130), "hill2": (66, 84, 107), "path": (164, 149, 128), "roof": (76, 82, 118), "building": (138, 150, 167)},
+        "mountain": {"sky_top": (12, 26, 44), "sky_bottom": (117, 145, 176), "ground": (102, 118, 89), "hill": (85, 127, 108), "hill2": (60, 90, 78), "path": (166, 138, 90), "roof": (96, 117, 99), "building": (126, 136, 122)},
+        "village": {"sky_top": (24, 37, 48), "sky_bottom": (202, 160, 120), "ground": (145, 149, 104), "hill": (124, 138, 95), "hill2": (92, 111, 84), "path": (185, 160, 124), "roof": (122, 92, 72), "building": (172, 150, 122)},
+        "cafe": {"sky_top": (25, 34, 52), "sky_bottom": (242, 181, 148), "ground": (122, 116, 100), "hill": (142, 129, 110), "hill2": (109, 104, 92), "path": (195, 176, 146), "roof": (136, 82, 60), "building": (174, 164, 149)},
+        "travel": {"sky_top": (17, 29, 46), "sky_bottom": (202, 176, 147), "ground": (125, 128, 104), "hill": (131, 145, 118), "hill2": (89, 113, 112), "path": (188, 160, 117), "roof": (126, 94, 72), "building": (166, 158, 143)},
+    }
+    palette = palettes.get(theme, palettes["travel"])
     width, height = 1200, 1200
+
+    def gradient_layer(top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        for y in range(height):
+            ratio = y / height
+            draw.line((0, y, width, y), fill=(
+                int(top[0] * (1 - ratio) + bottom[0] * ratio),
+                int(top[1] * (1 - ratio) + bottom[1] * ratio),
+                int(top[2] * (1 - ratio) + bottom[2] * ratio),
+                255,
+            ))
+        return layer
+
+    def glow_layer(x: int, y: int, r: int, color: tuple[int, int, int, int]) -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=color)
+        draw.ellipse((x - r * 0.7, y - r * 0.7, x + r * 0.7, y + r * 0.7), fill=(color[0], color[1], color[2], color[3] // 2))
+        return layer
+
+    def build_hills() -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        draw.polygon([(0, 760), (120, 700), (250, 760), (420, 650), (590, 760), (740, 680), (930, 760), (1100, 650), (1200, 760), (1200, 1200), (0, 1200)], fill=palette["hill"])
+        draw.polygon([(0, 860), (180, 760), (330, 860), (540, 730), (760, 860), (920, 780), (1200, 860), (1200, 1200), (0, 1200)], fill=palette["hill2"])
+        return layer
+
+    def build_ground() -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        draw.rectangle((0, 820, width, height), fill=palette["ground"])
+
+        if theme in {"temple", "cafe", "city", "village"}:
+            for x in range(80, width, 120):
+                building_h = 140 + ((seed + x) % 120)
+                draw.rectangle((x, 760 - building_h, x + 70, 820), fill=palette["building"])
+                draw.rectangle((x + 16, 720 - building_h, x + 54, 760 - building_h + 18), fill=(240, 220, 175, 200))
+        elif theme in {"beach", "travel"}:
+            for x in range(50, width, 120):
+                draw.ellipse((x, 720, x + 100, 930), fill=(82 + (seed % 12), 131 + (seed % 18), 121, 160))
+        else:
+            for x in range(80, width, 90):
+                draw.ellipse((x, 700, x + 90, 980), fill=(45 + (seed % 18), 90 + (seed % 12), 66 + (seed % 10), 150))
+        return layer
+
+    def build_path() -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+        if theme == "beach":
+            draw.polygon([(0, 980), (220, 900), (420, 900), (620, 980), (780, 980), (980, 1070), (1200, 980), (1200, 1200), (0, 1200)], fill=(220, 201, 156, 220))
+        else:
+            draw.polygon([(0, 1030), (360, 900), (620, 920), (820, 1000), (990, 980), (1200, 1030), (1200, 1200), (0, 1200)], fill=palette["path"])
+        return layer
+
+    def build_detail_layers() -> Image.Image:
+        layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(layer)
+
+        if theme == "temple":
+            center_x = 600
+            for i, h in enumerate([200, 170, 160]):
+                x0 = center_x - 230 + i * 90
+                x1 = center_x + 230 - i * 90
+                draw.polygon([(x0, 700 - h), (center_x, 600 - h), (x1, 700 - h), (x1, 700), (x0, 700)], fill=palette["roof"])
+            draw.rectangle((540, 700, 660, 890), fill=(138, 117, 96, 180))
+            draw.rectangle((580, 740, 620, 880), fill=(255, 220, 160, 180))
+        elif theme == "beach":
+            draw.rectangle((0, 660, width, 820), fill=(75, 126, 153, 180))
+            draw.arc((180, 540, 1000, 900), start=180, end=360, fill=(255, 228, 184, 120), width=16)
+        elif theme == "city":
+            for x in range(70, width, 110):
+                h = 190 + ((seed + x) % 100)
+                draw.rectangle((x, 820 - h, x + 80, 820), fill=(90 + (seed % 25), 98 + (seed % 15), 117 + (seed % 10), 200))
+                draw.rectangle((x + 12, 820 - h + 20, x + 35, 820), fill=(255, 218, 162, 220))
+        elif theme == "mountain":
+            draw.polygon([(0, 820), (150, 650), (280, 790), (450, 630), (620, 820), (820, 670), (960, 820), (1200, 720), (1200, 1200), (0, 1200)], fill=(66, 92, 90, 220))
+
+        if theme in {"temple", "city", "cafe", "village"}:
+            for x in [260, 480, 740, 940]:
+                draw.ellipse((x, 760, x + 42, 820), fill=(56, 51, 46, 220))
+                draw.line((x + 20, 820, x + 10, 910), fill=(56, 51, 46, 220), width=8)
+                draw.line((x + 20, 840, x + 52, 890), fill=(56, 51, 46, 220), width=6)
+                draw.line((x + 20, 840, x - 18, 892), fill=(56, 51, 46, 220), width=6)
+        else:
+            draw.ellipse((320, 770, 370, 830), fill=(60, 55, 48, 210))
+            draw.ellipse((860, 750, 910, 810), fill=(60, 55, 48, 210))
+            draw.line((345, 830, 345, 930), fill=(60, 55, 48, 210), width=7)
+            draw.line((885, 810, 885, 910), fill=(60, 55, 48, 210), width=7)
+
+        for i in range(200):
+            x = (seed + i * 97) % width
+            y = (seed * 13 + i * 53) % height
+            draw.ellipse((x, y, x + 2, y + 2), fill=(255, 255, 255, 12 + (i % 20)))
+
+        return layer
+
     img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
+    img = Image.alpha_composite(img, gradient_layer(palette["sky_top"], palette["sky_bottom"]))
+    img = Image.alpha_composite(img, glow_layer(880 + (seed % 180), 180 + ((seed >> 2) % 140), 120 + (seed % 40), (255, 216, 136, 180)))
+    for x, y, r, s in [(150, 220, 200, 60), (430, 180, 210, 65), (760, 230, 180, 55), (990, 180, 170, 50)]:
+        img = Image.alpha_composite(img, glow_layer(x, y, r, (255, 255, 255, 50 + (seed % 30))))
+        img = Image.alpha_composite(img, glow_layer(x + 10, y + 8, int(r * 0.75), (255, 255, 255, 25 + (seed % 18))))
 
-    for y in range(height):
-        ratio = y / height
-        r = int(sky_top[0] * (1 - ratio) + sky_bottom[0] * ratio)
-        g = int(sky_top[1] * (1 - ratio) + sky_bottom[1] * ratio)
-        b = int(sky_top[2] * (1 - ratio) + sky_bottom[2] * ratio)
-        draw.line((0, y, width, y), fill=(r, g, b, 255))
-
-    glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    glow_draw = ImageDraw.Draw(glow)
-    glow_size = 240 + ((seed >> 4) % 140)
-    glow_x = 700 + ((seed >> 2) % 180)
-    glow_y = 60 + ((seed >> 6) % 80)
-    glow_draw.ellipse((glow_x, glow_y, glow_x + glow_size, glow_y + glow_size * 0.7), fill=(255, 214, 120, 180))
-    glow_draw.ellipse((glow_x + 30, glow_y + 20, glow_x + glow_size - 30, glow_y + glow_size * 0.7 - 20), fill=(255, 236, 170, 150))
-    img = Image.alpha_composite(img, glow)
-
-    cloud_color = (255, 255, 255, 60 + (seed % 30))
-    for cx, cy, rx, ry in [(200, 230, 140, 50), (480, 205, 160, 55), (780, 250, 180, 60), (970, 180, 140, 45)]:
-        draw.ellipse((cx - rx + (seed % 12), cy - ry + (seed % 9), cx + rx + (seed % 12), cy + ry + (seed % 9)), fill=cloud_color)
-
-    landscape_bias = (seed % 5)
-    if landscape_bias in (0, 3):
-        mountain_layers = [
-            ((0, 620), (170, 440), (360, 650), (530, 430), (740, 680), (910, 470), (1110, 640), (1200, 760), (0, 760)),
-            ((0, 720), (160, 560), (340, 740), (550, 600), (760, 760), (980, 610), (1200, 720), (1200, 860), (0, 860)),
-        ]
-        mountain_colors = [(64 + (seed % 30), 88 + (seed % 20), 96), (90 + (seed % 20), 112 + (seed % 18), 110)]
-        for layer, color in zip(mountain_layers, mountain_colors):
-            draw.polygon(layer, fill=color)
-
-    ground = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    ground_draw = ImageDraw.Draw(ground)
-    if landscape_bias in (1, 2):
-        ground_draw.rectangle((0, 760, width, height), fill=(88 + (seed % 15), 124 + (seed % 15), 146, 200))
-        for x in range(0, width, 80):
-            ground_draw.arc((x, 800, x + 120, 940), start=180, end=360, fill=(150 + (seed % 30), 200 + (seed % 20), 220, 170), width=4)
-        ground_draw.ellipse((200 + (seed % 180), 780, 1000 - (seed % 120), 1120), fill=(255, 190, 110, 90))
-    else:
-        ground_draw.rectangle((0, 760, width, height), fill=(101 + (seed % 20), 132 + (seed % 15), 96 + (seed % 18), 220))
-        for x in range(0, width, 90):
-            ground_draw.ellipse((x, 700, x + 64, 930), fill=(54 + (seed % 18), 95 + (seed % 20), 70 + (seed % 10), 160))
-    img = Image.alpha_composite(img, ground)
-
-    path = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    path_draw = ImageDraw.Draw(path)
-    path_draw.polygon([(0, 860), (350, 760), (470, 760), (620, 860), (760, 860), (860, 960), (0, 1200)], fill=(200 + (seed % 25), 176, 127, 230))
-    path_draw.polygon([(620, 860), (760, 860), (980, 1200), (820, 1200)], fill=(177 + (seed % 18), 149, 101, 220))
-    img = Image.alpha_composite(img, path)
-
-    if landscape_bias in (0, 4):
-        skyline = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        sdraw = ImageDraw.Draw(skyline)
-        for x in range(100, 1100, 120):
-            building_h = 180 + ((seed + x) % 120)
-            sdraw.rectangle((x, 760 - building_h, x + 70 + (seed % 10), 760), fill=(110 + (seed % 20), 120, 136, 180))
-            sdraw.rectangle((x + 18, 720 - building_h, x + 52, 760 - building_h + 30), fill=(220, 205, 165, 220))
-        img = Image.alpha_composite(img, skyline)
-
-    if landscape_bias in (1, 5):
-        blossom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-        bdraw = ImageDraw.Draw(blossom)
-        for x in range(80, width - 120, 100):
-            for y in range(180, 520, 80):
-                bdraw.ellipse((x + (seed % 8), y, x + 28 + (seed % 10), y + 28), fill=(255, 180 + (seed % 20), 205, 200))
-        img = Image.alpha_composite(img, blossom)
-
-    figure = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    fdraw = ImageDraw.Draw(figure)
-    figure_x = 220 + (seed % 170)
-    fdraw.ellipse((figure_x, 700, figure_x + 52, 760), fill=(77, 65, 58, 220))
-    fdraw.line((figure_x + 26, 760, figure_x + 26, 855), fill=(77, 65, 58, 220), width=8)
-    fdraw.line((figure_x + 26, 785, figure_x + 62, 830), fill=(77, 65, 58, 220), width=6)
-    fdraw.line((figure_x + 26, 785, figure_x - 12, 832), fill=(77, 65, 58, 220), width=6)
-    img = Image.alpha_composite(img, figure)
+    img = Image.alpha_composite(img, build_hills())
+    img = Image.alpha_composite(img, build_ground())
+    img = Image.alpha_composite(img, build_path())
+    img = Image.alpha_composite(img, build_detail_layers())
 
     vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     vdraw = ImageDraw.Draw(vignette)
-    for i in range(220, 0, -1):
-        alpha = int(220 - i * 0.8)
+    for i in range(250, 0, -1):
+        alpha = int(250 - i * 0.9)
         vdraw.ellipse((i, i, width - i, height - i), outline=(0, 0, 0, alpha), width=2)
     img = Image.alpha_composite(img, vignette)
 
-    rgb_img = img.convert("RGB")
-    rgb_img = rgb_img.filter(ImageFilter.SMOOTH)
+    img = ImageEnhance.Color(img).enhance(1.12)
+    img = ImageEnhance.Contrast(img).enhance(1.08)
+    img = img.filter(ImageFilter.SMOOTH_MORE)
+
     buffer = io.BytesIO()
-    rgb_img.save(buffer, format="PNG")
+    img.convert("RGB").save(buffer, format="PNG")
     return buffer.getvalue()
 
 
@@ -241,51 +338,57 @@ def analyze_images(images: list[bytes], image_names: list[str] | None = None) ->
     if client is None:
         raise ValueError("Gemini API key is missing or invalid. Set a valid GEMINI_API_KEY.")
 
-    prompt = types.Part.from_text(
-        text="""
-        以下の複数の写真は、同じ1日の出来事を撮影したものです。
-
-        写真をまとめて分析し、その日の出来事を要約してください。
-
-        以下のJSON形式だけで回答してください。
-
-        {
-          "summary": "1日の出来事を1〜3文で要約",
-          "events": [
-            "出来事1",
-            "出来事2",
-            "出来事3"
-          ]
-        }
-
-        写真から明確に判断できないことは推測しないでください。
-        """
-    )
-
     image_parts = []
     for index, image in enumerate(images):
-        name = (image_names or [None] * len(images))[index] if image_names else None
-        normalized_bytes, mime_type = _normalize_image_for_gemini(image, name)
-        image_parts.append(types.Part.from_bytes(data=normalized_bytes, mime_type=mime_type))
+        normalized_bytes, _ = _normalize_image_for_gemini(image, (image_names or [None] * len(images))[index] if image_names else None)
+        image_parts.append({
+            "inline_data": {
+                "mime_type": "image/jpeg",
+                "data": base64.b64encode(normalized_bytes).decode("ascii"),
+            }
+        })
+
+    prompt = """
+    以下の複数の写真は、同じ1日の出来事を撮影したものです。
+
+    写真をまとめて分析し、その日の出来事を要約してください。
+
+    以下のJSON形式だけで回答してください。
+
+    {
+      "summary": "1日の出来事を1〜3文で要約",
+      "events": [
+        "出来事1",
+        "出来事2",
+        "出来事3"
+      ]
+    }
+
+    写真から明確に判断できないことは推測しないでください。
+    """
 
     last_error = None
     for attempt in range(3):
         try:
             response = client.models.generate_content(
                 model=_model_name,
-                contents=[prompt, *image_parts],
+                contents=[{
+                    "role": "user",
+                    "parts": [{"text": prompt}, *image_parts],
+                }],
+                config=genai_types.GenerateContentConfig(response_mime_type="application/json"),
             )
-
             text = getattr(response, "text", None)
-            if text is None:
-                candidates = getattr(response, "candidates", None) or []
-                if candidates:
-                    parts = getattr(candidates[0].content, "parts", []) or []
-                    for part in parts:
+            if not text:
+                for candidate in getattr(response, "candidates", []) or []:
+                    for part in getattr(getattr(candidate, "content", None), "parts", []) or []:
                         if getattr(part, "text", None):
                             text = part.text
                             break
-
+                    if text:
+                        break
+            if not text:
+                raise ValueError("Gemini response did not include text content.")
             return _parse_json_response(text)
         except Exception as exc:
             last_error = exc
