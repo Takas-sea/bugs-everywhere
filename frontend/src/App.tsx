@@ -188,8 +188,11 @@ export default function App() {
   const handleStartCreateTrip = () => {
     setUploadBackScreen('home');
 
-    // 新しい旅として扱うため、以前の編集中データをリセット
+    // 新しい旅として扱うため、以前の状態をすべてリセット。
+    // selectedTrip を戻さないと、直前に開いていた旅行に写真が
+    // 追加されてしまいます。
     setCurrentTripDraft(null);
+    setSelectedTrip(EMPTY_TRIP);
     setRealTripId(null);
     setLoadError(null);
 
