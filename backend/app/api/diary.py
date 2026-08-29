@@ -6,9 +6,16 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.services.diary_generator import generate_daily_diary
+from app.services.diary_generator import fill_gap_scenes_for_trip, generate_daily_diary
 from app.services.gemini import analyze_images
-from app.services.supabase import get_daily_photo_paths, get_image, supabase
+from app.services.supabase import (
+    get_daily_photo_paths,
+    get_image,
+    insert_photo_metadata,
+    query_photo_rows_by_day,
+    resolve_trip_ids_by_owner_token,
+    supabase,
+)
 
 router = APIRouter()
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,19 +44,10 @@ async def upload_image(
             "content_type": file.content_type,
         }
 
-        last_error = None
-        for field in ("owner_token", "trip_id"):
-            try:
-                metadata_to_insert = dict(metadata)
-                metadata_to_insert[field] = owner_token
-                supabase.table("photos").insert(metadata_to_insert).execute()
-                break
-            except Exception as exc:
-                last_error = exc
-                if "does not exist" not in str(exc):
-                    raise
-        else:
-            raise last_error
+        insert_photo_metadata(owner_token, metadata, client=supabase)
+
+        for trip_id in resolve_trip_ids_by_owner_token(owner_token, client=supabase):
+            fill_gap_scenes_for_trip(trip_id)
 
         return {
             "message": "アップロード成功",
@@ -69,26 +67,8 @@ def list_images(owner_token: str, date: str):
         start = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%dT00:00:00Z")
         end = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%dT23:59:59Z")
 
-        last_error = None
-        for field in ("owner_token", "trip_id"):
-            try:
-                rows = (
-                    supabase.table("photos")
-                    .select("storage_path, created_at")
-                    .gte("created_at", start)
-                    .lt("created_at", end)
-                    .eq(field, owner_token)
-                    .order("created_at")
-                    .execute()
-                )
-                files = getattr(rows, "data", []) or []
-                return {"owner_token": owner_token, "date": date, "files": files}
-            except Exception as exc:
-                last_error = exc
-                if "does not exist" not in str(exc):
-                    raise
-
-        raise last_error
+        files = query_photo_rows_by_day(owner_token, date, select_fields="storage_path, created_at", client=supabase)
+        return {"owner_token": owner_token, "date": date, "files": files}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
