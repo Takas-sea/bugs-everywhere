@@ -247,7 +247,8 @@ def _panel_scene_summary(scene_id: str | None, panel_mode: str) -> str:
             if gap_summary:
                 return gap_summary
         return scene.get("summary") or "旅の記憶をまとめた一コマです。"
-    except Exception:
+    except Exception as e:
+        print("シーン要約エラー:", repr(e))
         return "旅の記憶をまとめた一コマです。"
 
 
@@ -381,10 +382,9 @@ def fill_gap_scenes_for_trip(trip_id: str) -> list[dict]:
             filled.append({"scene_id": scene_id, "trip_id": trip_id, "storage_path": storage_path, "summary": summary, "mode": "gen", "status": "done"})
 
         return filled
-    except Exception:
+    except Exception as e:
+        print("日記生成エラー:", repr(e))
         return []
-
-
 def generate_daily_diary(owner_token: str, date: str) -> dict:
     try:
         photo_rows = get_daily_photo_rows(owner_token=owner_token, date=date)
