@@ -82,7 +82,7 @@ export async function toPhotoItems(
   options: ToPhotoItemsOptions = {},
 ): Promise<PhotoItem[]> {
   const {
-    expiresInSeconds = 60 * 60,
+    expiresInSeconds = 60 * 60 * 12,
     selected = true,
     contributor = ANONYMOUS_CONTRIBUTOR,
   } = options;
@@ -167,9 +167,26 @@ function placeOf(scene: SceneRow, photos: PhotoRow[]): string | null {
   // 手で直した名前があれば、それが正しい
   if (scene.place) return scene.place;
 
+  // 1コマに複数の写真があるときは、多数決で決めます。
+  // 最初の1枚だけを見ると、その1枚のGPSがずれていたときに
+  // コマ全体が違う場所になってしまうためです。
   const ids = new Set(scene.photo_ids);
-  for (const p of photos) if (ids.has(p.id) && p.location_name) return p.location_name;
-  return null;
+  const counts = new Map<string, number>();
+
+  for (const p of photos) {
+    if (!ids.has(p.id) || !p.location_name) continue;
+    counts.set(p.location_name, (counts.get(p.location_name) ?? 0) + 1);
+  }
+
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [name, n] of counts) {
+    if (n > bestCount) {
+      best = name;
+      bestCount = n;
+    }
+  }
+  return best;
 }
 
 /**
@@ -428,15 +445,16 @@ export async function loadMyTrips(limit = 20): Promise<Trip[]> {
   const rows = (data ?? []) as { id: string; title: string | null }[];
   console.info(`[loadMyTrips] ${rows.length}件の旅行が見つかりました`, rows);
 
+  // 1件ずつ待つと、旅行が増えるほどホーム画面が出るまで待たされます。
+  // 失敗した旅行だけを落として、残りは表示します。
+  const settled = await Promise.allSettled(rows.map((row) => loadTrip(row.id)));
+
   const trips: Trip[] = [];
-  for (const row of rows) {
-    try {
-      trips.push(await loadTrip(row.id));
-    } catch (e) {
-      // 何が原因で表示できないのかを必ず出す（黙って消さない）
-      console.error(`[loadMyTrips] 旅行 ${row.id} の読み込みに失敗しました`, e);
-    }
-  }
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') trips.push(r.value);
+    // 何が原因で表示できないのかを必ず出す（黙って消さない）
+    else console.error(`[loadMyTrips] 旅行 ${rows[i].id} の読み込みに失敗しました`, r.reason);
+  });
   console.info(`[loadMyTrips] ${trips.length}件を画面に渡します`);
   return trips;
 }

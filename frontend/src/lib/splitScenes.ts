@@ -42,6 +42,8 @@ export type SplitConfig = {
   targetSceneCount: number;
   /** シーンとシーンの間がこれ以上空いていたら空白シーンを挿入（分） */
   gapThresholdMinutes: number;
+  /** どれだけ間隔が空いていても、これ以上のコマ数にはしない（生成の時間と費用の上限） */
+  maxSceneCount: number;
 };
 
 export const DEFAULT_CONFIG: SplitConfig = {
@@ -51,6 +53,7 @@ export const DEFAULT_CONFIG: SplitConfig = {
   maxPhotosPerScene: 8,
   targetSceneCount: 5,
   gapThresholdMinutes: 90,
+  maxSceneCount: 8,
 };
 
 // ---------------------------------------------------------------- 補助
@@ -110,36 +113,40 @@ export function splitScenes(
     else groups.push([photo]);
   }
 
-  // 3. コマ数を固定する。写真の多いシーンを残し、
-  //    落ちたシーンの写真は時間的に一番近いシーンに吸収させる
-  if (groups.length > config.targetSceneCount) {
-    const ranked = [...groups].sort((a, b) => b.length - a.length);
-    const kept = ranked
-      .slice(0, config.targetSceneCount)
-      .sort((a, b) => a[0].takenAt.getTime() - b[0].takenAt.getTime());
-    const dropped = ranked.slice(config.targetSceneCount);
+  // 3. コマ数を減らす。
+  //
+  //    隣り合うグループのうち「間隔が一番短いペア」から順にくっつけます。
+  //    写真の枚数が多い順に残す方式だと、遠く離れた写真を無理やり吸収して
+  //    シーンの終了時刻が引き伸ばされ、本来そこにあった「写真が残っていない
+  //    時間」が消えてしまいます。このプロダクトで一番見せたいコマなので、
+  //    大きく空いた間隔は最後まで残るようにしています。
+  //
+  //    ただし生成には時間と費用がかかるので、maxSceneCount を超えている間は
+  //    大きな間隔でもくっつけます。
+  while (groups.length > config.targetSceneCount) {
+    let bestIndex = -1;
+    let bestGap = Infinity;
 
-    for (const group of dropped) {
-      const t = group[0].takenAt.getTime();
-      let nearest = kept[0];
-      let best = Infinity;
-      for (const k of kept) {
-        const d = Math.min(
-          Math.abs(k[0].takenAt.getTime() - t),
-          Math.abs(k[k.length - 1].takenAt.getTime() - t),
-        );
-        if (d < best) {
-          best = d;
-          nearest = k;
-        }
+    for (let i = 0; i < groups.length - 1; i++) {
+      const gap = minutesBetween(
+        groups[i][groups[i].length - 1].takenAt,
+        groups[i + 1][0].takenAt,
+      );
+      if (gap < bestGap) {
+        bestGap = gap;
+        bestIndex = i;
       }
-      nearest.push(...group);
     }
 
-    for (const g of kept) {
-      g.sort((a, b) => a.takenAt.getTime() - b.takenAt.getTime());
+    if (bestIndex === -1) break;
+
+    // 空白コマになるほど空いているなら、上限を超えていない限り残す
+    if (bestGap >= config.gapThresholdMinutes && groups.length <= config.maxSceneCount) {
+      break;
     }
-    groups = kept;
+
+    groups[bestIndex].push(...groups[bestIndex + 1]);
+    groups.splice(bestIndex + 1, 1);
   }
 
   // 4. シーンに変換し、間が大きく空いていれば空白シーンを差し込む

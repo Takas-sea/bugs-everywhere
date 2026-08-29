@@ -25,8 +25,14 @@ const NOMINATIM = "https://nominatim.openstreetmap.org/reverse";
 const OVERPASS = "https://overpass-api.de/api/interpreter";
 
 const MIN_INTERVAL_MS = 1100; // 利用規約：1秒に1回まで
+const SHOP_MARGIN_M = 25; // 1番目と2番目の差がこれ以上なら「はっきり近い」
 const CACHE_PRECISION = 3; // 小数3桁 ≒ 110m。同じスポットは1回で済ませる
-const LANDMARK_RADIUS_M = 120; // 点で登録された施設は、ほぼ目の前にいるときだけ採用する
+// 施設の探し方は2段階。「行き先になる場所」は少し広く、
+// 「たまたま近くにあるだけの店」はごく近くだけを見る。
+const LANDMARK_RADIUS_M = 150; // 観光地・史跡・寺社・公園・駅
+const SHOP_RADIUS_M = 60;      // 飲食店・商店を探す範囲
+// 店が密集している場所では、どれが正解かGPSの精度では決められません。
+// 2番目の候補がこの距離より近いなら、競っているとみなして店名を諦めます。
 
 export type Place = {
   /** 具体的な場所。「東大寺」「大豆山町」など。取れなければ null */
@@ -72,8 +78,16 @@ type OverpassElement = {
 };
 
 /**
- * 近くにある名前付きの観光地・史跡・公園・神社仏閣を探して、
- * 一番近いものの名前を返す。
+ * 近くにある名前付きの場所を探して、一番近いものの名前を返す。
+ *
+ * 2段階に分けています。
+ *   強い候補（観光地・史跡・寺社・公園・駅）… 150m まで
+ *   弱い候補（飲食店・商店）                 … 60m まで
+ *
+ * 旅行の写真は食事や買い物の場面も多いので、店の名前が出せると
+ * 日記がぐっと具体的になります。ただ店は密集しているので、
+ * GPSが少しずれただけで隣の店を拾います。だから距離を厳しくして、
+ * 強い候補があればそちらを優先します。
  */
 /**
  * その座標を「含んでいる」エリアの名前を返す。
@@ -84,13 +98,14 @@ type OverpassElement = {
  */
 async function findContainingArea(lat: number, lng: number): Promise<string | null> {
   const query = [
-    "[out:json][timeout:15];",
+    "[out:json][timeout:20];",
     `is_in(${lat},${lng})->.a;`,
     "(",
     '  area.a["name"]["tourism"];',
     '  area.a["name"]["historic"];',
     '  area.a["name"]["leisure"="park"];',
     '  area.a["name"]["amenity"="place_of_worship"];',
+    '  area.a["name"]["shop"="mall"];',
     ");",
     "out tags;",
   ].join("\n");
@@ -122,16 +137,21 @@ function rankOf(el: OverpassElement): number {
 }
 
 async function findLandmark(lat: number, lng: number): Promise<string | null> {
-  const around = `${LANDMARK_RADIUS_M},${lat},${lng}`;
+  const strong = `${LANDMARK_RADIUS_M},${lat},${lng}`;
+  const weak = `${SHOP_RADIUS_M},${lat},${lng}`;
+
   const query = [
-    "[out:json][timeout:15];",
+    "[out:json][timeout:20];",
     "(",
-    `  nwr(around:${around})["name"]["tourism"];`,
-    `  nwr(around:${around})["name"]["historic"];`,
-    `  nwr(around:${around})["name"]["leisure"="park"];`,
-    `  nwr(around:${around})["name"]["amenity"="place_of_worship"];`,
+    `  nwr(around:${strong})["name"]["tourism"];`,
+    `  nwr(around:${strong})["name"]["historic"];`,
+    `  nwr(around:${strong})["name"]["leisure"="park"];`,
+    `  nwr(around:${strong})["name"]["amenity"="place_of_worship"];`,
+    `  nwr(around:${strong})["name"]["railway"="station"];`,
+    `  nwr(around:${weak})["name"]["shop"];`,
+    `  nwr(around:${weak})["name"]["amenity"~"^(restaurant|cafe|fast_food|bar|pub|ice_cream)$"];`,
     ");",
-    "out center 30;",
+    "out center 60;",
   ].join("\n");
 
   const res = await fetch(OVERPASS, {
@@ -144,8 +164,10 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
   const json = (await res.json()) as { elements?: OverpassElement[] };
   const elements = json.elements ?? [];
 
-  let best: string | null = null;
-  let bestDist = Infinity;
+  // 強い候補（観光地・駅など）と、弱い候補（店）を分けて集める
+  type Cand = { name: string; dist: number };
+  const strongs: Cand[] = [];
+  const weaks: Cand[] = [];
 
   for (const el of elements) {
     const name = el.tags?.["name:ja"] ?? el.tags?.name;
@@ -154,14 +176,50 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
     const eLng = el.lon ?? el.center?.lon;
     if (eLat === undefined || eLng === undefined) continue;
 
-    const d = distanceMeters(lat, lng, eLat, eLng);
-    if (d < bestDist) {
-      bestDist = d;
-      best = name;
+    const dist = distanceMeters(lat, lng, eLat, eLng);
+    if (isWeak(el)) {
+      if (dist <= SHOP_RADIUS_M) weaks.push({ name, dist });
+    } else if (dist <= LANDMARK_RADIUS_M) {
+      strongs.push({ name, dist });
     }
   }
-  return best;
+
+  // 強い候補があれば、一番近いものを採用する
+  if (strongs.length > 0) {
+    strongs.sort((a, b) => a.dist - b.dist);
+    return strongs[0].name;
+  }
+
+  if (weaks.length === 0) return null;
+
+  // 同じ店が点と面の両方で登録されていることがあるので、名前でまとめる
+  const byName = new Map<string, number>();
+  for (const w of weaks) {
+    const prev = byName.get(w.name);
+    if (prev === undefined || w.dist < prev) byName.set(w.name, w.dist);
+  }
+
+  const sorted = [...byName.entries()]
+    .map(([name, dist]) => ({ name, dist }))
+    .sort((a, b) => a.dist - b.dist);
+
+  // 2番目が近すぎるなら、どちらが正解かGPSの精度では決められない。
+  // 当てずっぽうの店名を出すより、町名に落としたほうが害が小さい。
+  if (sorted.length > 1 && sorted[1].dist - sorted[0].dist < SHOP_MARGIN_M) {
+    return null;
+  }
+  return sorted[0].name;
 }
+
+/** 飲食店や商店など、「たまたま近くにあるだけ」かもしれない候補か */
+function isWeak(el: OverpassElement): boolean {
+  const t = el.tags ?? {};
+  if (t.shop) return true;
+  return ["restaurant", "cafe", "fast_food", "bar", "pub", "ice_cream"].includes(
+    t.amenity ?? "",
+  );
+}
+
 
 // ---------------------------------------------------------------- 2. 住所
 

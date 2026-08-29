@@ -87,22 +87,69 @@ test("90分以上あいたら空白シーンが差し込まれる", () => {
   assert.equal(gaps[0].endedAt.getHours(), 13);
 });
 
-test("シーンが多すぎるときは指定した数まで絞られる", () => {
+test("シーンが多すぎるときは、間隔の短いものから順にまとめられる", () => {
   const scenes = splitScenes(
     [
+      // 30分おき。どこも空白コマになるほどは空いていない
       photo("09:00", KIYOMIZU),
-      photo("11:00", GION),
-      photo("13:00", KINKAKUJI),
+      photo("10:00", GION),
+      photo("11:00", KINKAKUJI),
+      photo("12:00", KIYOMIZU),
+      photo("13:00", GION),
+      photo("14:00", KINKAKUJI),
       photo("15:00", KIYOMIZU),
-      photo("17:00", GION),
-      photo("19:00", KINKAKUJI),
-      photo("21:00", KIYOMIZU),
     ],
     { ...DEFAULT_CONFIG, targetSceneCount: 3 },
   );
 
   assert.equal(scenes.filter((s) => !s.isGap).length, 3);
   // 写真が消えていないこと
+  const total = scenes.flatMap((s) => s.photoIds).length;
+  assert.equal(total, 7);
+});
+
+test("大きく空いた時間は、コマ数を減らすときも潰されない", () => {
+  // 午前に3枚、午後に3枚。間の11:00〜16:00は写真が無い
+  const scenes = splitScenes(
+    [
+      photo("09:00", KIYOMIZU),
+      photo("10:00", KIYOMIZU),
+      photo("11:00", GION),
+      photo("16:00", KINKAKUJI),
+      photo("17:00", KINKAKUJI),
+      photo("18:00", GION),
+    ],
+    { ...DEFAULT_CONFIG, targetSceneCount: 2 },
+  );
+
+  // 目標が2コマでも、空白の時間帯は残る
+  const gaps = scenes.filter((s) => s.isGap);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].startedAt.getHours(), 11);
+  assert.equal(gaps[0].endedAt.getHours(), 16);
+
+  const total = scenes.flatMap((s) => s.photoIds).length;
+  assert.equal(total, 6);
+});
+
+test("コマ数の上限を超えたら、大きな間隔でもまとめる", () => {
+  // 2時間おきに7枚。全部が空白コマ級に空いている
+  const scenes = splitScenes(
+    [
+      photo("07:00", KIYOMIZU),
+      photo("09:00", GION),
+      photo("11:00", KINKAKUJI),
+      photo("13:00", KIYOMIZU),
+      photo("15:00", GION),
+      photo("17:00", KINKAKUJI),
+      photo("19:00", KIYOMIZU),
+    ],
+    { ...DEFAULT_CONFIG, targetSceneCount: 3, maxSceneCount: 5 },
+  );
+
+  const withPhotos = scenes.filter((s) => !s.isGap).length;
+  assert.ok(withPhotos <= 5, `写真のあるコマが多すぎます: ${withPhotos}`);
+
   const total = scenes.flatMap((s) => s.photoIds).length;
   assert.equal(total, 7);
 });
