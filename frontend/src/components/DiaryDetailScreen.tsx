@@ -146,6 +146,30 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  bestShotPhotographer: '田中さん',
  };
 
+ /* 表示用のまとめ。数字は summaryStats、名前は trip の中身から作ります */
+ const spotRange =
+   trip.spots.length === 0
+     ? '記録なし'
+     : trip.spots.length === 1
+       ? trip.spots[0].name
+       : `${trip.spots[0].name}〜${trip.spots[trip.spots.length - 1].name}`;
+
+ const timeRange = summary.travelDuration || '';
+
+ /* 開始と終了の時刻から所要時間を作る */
+ const durationLabel = (() => {
+   const m = timeRange.match(/(\d{1,2}):(\d{2})\D+?(\d{1,2}):(\d{2})/);
+   if (!m) return timeRange || '—';
+   const diff =
+     (Number(m[3]) * 60 + Number(m[4])) - (Number(m[1]) * 60 + Number(m[2]));
+   if (diff <= 0) return timeRange;
+   const h = Math.floor(diff / 60);
+   const mm = diff % 60;
+   return h > 0 ? `約${h}時間${mm > 0 ? `${mm}分` : ''}` : `約${mm}分`;
+ })();
+
+ const memberNames = trip.members.map((m) => m.name).join('・') || '記録なし';
+
  return (
  <div className="pb-28 md:pb-16 max-w-5xl mx-auto px-4 sm:px-6 pt-2 md:pt-4 font-sans text-slate-900">
  {/* Top Back & Quick Action Bar */}
@@ -512,14 +536,14 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.visitedPlacesCount}
  <span className="ml-2 text-sm font-normal text-slate-600">箇所</span>
  </div>
- <div className="text-xs text-slate-400 mt-3 truncate">京都駅〜伏見稲荷</div>
+ <div className="text-xs text-slate-400 mt-3 truncate">{spotRange}</div>
  </div>
 
  {/* 2. 旅行時間 */}
  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
  <div className="text-sm text-slate-600 font-medium mb-3">旅行時間</div>
- <div className="text-2xl font-bold text-red-600">約9時間15分</div>
- <div className="text-xs text-slate-400 mt-3">10:05 〜 19:20</div>
+ <div className="text-2xl font-bold text-red-600">{durationLabel}</div>
+ <div className="text-xs text-slate-400 mt-3">{timeRange}</div>
  </div>
 
  {/* 3. 撮影した写真 */}
@@ -529,7 +553,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.totalPhotosCount}
  <span className="ml-2 text-sm font-normal text-slate-600">枚</span>
  </div>
- <div className="text-xs text-slate-400 mt-3">3人で集約</div>
+ <div className="text-xs text-slate-400 mt-3">{summary.membersCount}人で集約</div>
  </div>
 
  {/* 4. 参加メンバー */}
@@ -539,7 +563,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.membersCount}
  <span className="ml-2 text-sm font-normal text-slate-600">人</span>
  </div>
- <div className="text-xs text-slate-400 mt-3 truncate">山下・田中・佐藤</div>
+ <div className="text-xs text-slate-400 mt-3 truncate">{memberNames}</div>
  </div>
  </div>
  </section>
