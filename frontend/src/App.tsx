@@ -2,13 +2,29 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import { ActiveScreen, Trip } from './types';
 
-import {
-  ALL_PAST_TRIPS,
-  MOCK_KYOTO_TRIP,
-  SAMPLE_MEMBERS,
-} from './data/mockTrips';
+import { SAMPLE_MEMBERS } from './data/mockTrips';
+
+/**
+ * 旅行を1つも作っていないときの入れ物。
+ * サンプルの旅行（京都・大阪など）は本物と紛らわしいので出していません。
+ */
+const EMPTY_TRIP: Trip = {
+  id: 'new',
+  title: '新しい旅の記録',
+  date: '',
+  destination: '',
+  coverImage: '',
+  members: [],
+  spotsCount: 0,
+  photosCount: 0,
+  weather: '',
+  spots: [],
+  entries: [],
+  tags: [],
+};
 
 import { loadTrip, loadMyTrips } from './lib/adapters';
+import { subscribePanels } from './lib/realtime';
 
 import { HomeScreen } from './components/HomeScreen';
 import { LoginScreen } from './components/LoginScreen';
@@ -16,7 +32,6 @@ import { UploadScreen } from './components/UploadScreen';
 import { GeneratingScreen } from './components/GeneratingScreen';
 import { DiaryDetailScreen } from './components/DiaryDetailScreen';
 import { MemoriesListScreen } from './components/MemoriesListScreen';
-import { ProfileScreen } from './components/ProfileScreen';
 import { InviteModal } from './components/InviteModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
 
@@ -29,10 +44,10 @@ export default function App() {
     useState<ActiveScreen>('home');
 
   const [pastTrips, setPastTrips] =
-    useState<Trip[]>(ALL_PAST_TRIPS);
+    useState<Trip[]>([]);
 
   const [selectedTrip, setSelectedTrip] =
-    useState<Trip>(MOCK_KYOTO_TRIP);
+    useState<Trip>(EMPTY_TRIP);
 
   const [isInviteModalOpen, setIsInviteModalOpen] =
     useState(false);
@@ -130,6 +145,31 @@ export default function App() {
   }, []);
 
   // =========================
+  // 共有URL（?trip=...）で開かれたとき
+  // =========================
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('trip');
+    if (!id || !UUID_RE.test(id)) return;
+
+    setRealTripId(id);
+
+    loadTrip(id)
+      .then((trip) => {
+        setSelectedTrip(trip);
+        setPastTrips((prev) => [
+          trip,
+          ...prev.filter((t) => t.id !== trip.id),
+        ]);
+        setActiveScreen('diary');
+      })
+      .catch((e) => {
+        console.error('[共有URL]', e);
+        setLoadError('共有された日記が見つかりませんでした');
+      });
+  }, []);
+
+  // =========================
   // この端末で作った旅行を読み込む
   // =========================
 
@@ -174,8 +214,11 @@ export default function App() {
   const handleStartCreateTrip = () => {
     setUploadBackScreen('home');
 
-    // 新しい旅として扱うため、以前の編集中データをリセット
+    // 新しい旅として扱うため、以前の状態をすべてリセット。
+    // selectedTrip を戻さないと、直前に開いていた旅行に写真が
+    // 追加されてしまいます。
     setCurrentTripDraft(null);
+    setSelectedTrip(EMPTY_TRIP);
     setRealTripId(null);
     setLoadError(null);
 
@@ -277,6 +320,31 @@ export default function App() {
     }
   }, [selectedTrip]);
 
+  /**
+   * 日記を開いている間、生成の進みを自動で取り込みます。
+   * コマが1つ仕上がるたびに通知が来るので、少し待ってからまとめて読み直します。
+   */
+  useEffect(() => {
+    if (activeScreen !== 'diary') return;
+    if (!selectedTrip || !UUID_RE.test(selectedTrip.id)) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = subscribePanels(selectedTrip.id, {
+      onChange: () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { void refreshCurrentTrip(); }, 1200);
+      },
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+    // 読み直すたびに購読し直さないよう、旅行IDだけを見ています
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScreen, selectedTrip?.id]);
+
   // =========================
   // Lightbox
   // =========================
@@ -318,7 +386,6 @@ export default function App() {
             onSelectTrip={handleSelectTrip}
             onNewTripClick={handleStartCreateTrip}
             onViewAllMemories={() => changeScreen('memories')}
-            onProfileClick={() => changeScreen('profile')}
             userName={userName}
             onLogout={handleLogout}
           />
@@ -350,15 +417,6 @@ export default function App() {
 
         {activeScreen === 'diary' && (
           <>
-            <div className="px-4 pt-4">
-              <button
-                onClick={refreshCurrentTrip}
-                className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
-              >
-                最新の状態に更新
-              </button>
-            </div>
-
             <DiaryDetailScreen
               trip={selectedTrip}
               onBack={() => changeScreen('home')}
@@ -385,9 +443,6 @@ export default function App() {
           />
         )}
 
-        {/* ===================== Profile ===================== */}
-
-        {activeScreen === 'profile' && <ProfileScreen />}
       </main>
 
       <InviteModal
@@ -395,6 +450,11 @@ export default function App() {
         onClose={() => setIsInviteModalOpen(false)}
         tripTitle={selectedTrip?.title || '旅の記録'}
         members={selectedTrip?.members || SAMPLE_MEMBERS}
+        tripId={
+          selectedTrip && UUID_RE.test(selectedTrip.id)
+            ? selectedTrip.id
+            : realTripId ?? undefined
+        }
       />
 
       <PhotoLightbox

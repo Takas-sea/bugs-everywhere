@@ -33,25 +33,39 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
   const [errors, setErrors] = useState<string[]>([]);
   const [noExifCount, setNoExifCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const creatingRef = useRef<Promise<string> | null>(null);
 
-  // Supabase 上の旅行を用意する。
-  // CreateTripScreen がまだモックのIDを作っている場合は、ここで本物を作ります。
+  // 既存の旅行に写真を追加しに来た場合だけ、その旅行IDを引き継ぎます。
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        if (UUID_RE.test(currentTrip.id)) {
-          if (!cancelled) setTripId(currentTrip.id);
-          return;
-        }
-        const trip = await createTrip(currentTrip.title);
-        if (!cancelled) setTripId(trip.id);
-      } catch (e) {
-        if (!cancelled) setErrors([`旅行の作成に失敗しました: ${String(e)}`]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [currentTrip.id, currentTrip.title]);
+    setTripId(UUID_RE.test(currentTrip.id) ? currentTrip.id : null);
+  }, [currentTrip.id]);
+
+  /**
+   * 旅行IDを用意する。無ければこの時点で作ります。
+   *
+   * 画面を開いた時点で作らないのが大事です。開いて何もせず戻るたびに、
+   * 空の旅行がDBに増えてしまうためです。
+   */
+  const ensureTripId = async (): Promise<string> => {
+    if (tripId) return tripId;
+    if (creatingRef.current) return creatingRef.current;
+
+    const now = new Date();
+    const title =
+      `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日の記録`;
+
+    const promise = createTrip(title).then((trip) => {
+      setTripId(trip.id);
+      return trip.id;
+    });
+    creatingRef.current = promise;
+
+    try {
+      return await promise;
+    } finally {
+      creatingRef.current = null;
+    }
+  };
 
   const refresh = useCallback(async (id: string) => {
     const items = await loadPhotoItems(id);
@@ -66,19 +80,20 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
 
   /** ここが本体。EXIF読み取り・Storage保存・DB登録は uploadPhotos の中で終わります */
   const handleFiles = async (files: File[]) => {
-    if (!tripId || files.length === 0) return;
+    if (files.length === 0) return;
     setBusy(true);
     setErrors([]);
     setProgress(`0 / ${files.length} 枚`);
 
     try {
-      const { failed } = await uploadPhotos(files, tripId, (done, total) => {
+      const id = await ensureTripId();
+      const { failed } = await uploadPhotos(files, id, (done, total) => {
         setProgress(`${done} / ${total} 枚`);
       });
       if (failed.length) {
         setErrors(failed.map((f) => `${f.file}: ${f.reason}`));
       }
-      await refresh(tripId);
+      await refresh(id);
     } catch (e) {
       setErrors([String(e)]);
     } finally {

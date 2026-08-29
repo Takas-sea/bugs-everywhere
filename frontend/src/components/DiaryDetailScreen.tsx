@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
  Download, UserPlus, Heart, Bookmark, ArrowLeft,
- Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check, RefreshCw,
+ Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check,
  MessageCircle, Send, Plus, Flame, Sparkle
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
+import { renameTrip } from '../lib/trips';
 
 interface DiaryDetailScreenProps {
  trip: Trip;
@@ -28,19 +29,41 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  const [selectedMapSpot, setSelectedMapSpot] = useState<MapSpot | null>(trip.spots[0] || null);
  const [copiedLink, setCopiedLink] = useState(false);
 
+ /* 名前の編集 */
+ const [isRenaming, setIsRenaming] = useState(false);
+ const [titleDraft, setTitleDraft] = useState(initialTrip.title);
+ const [renameError, setRenameError] = useState<string | null>(null);
+
+ /* 親が読み直した内容をここにも反映する（生成の進みを取り込むため） */
+ useEffect(() => {
+   setTrip(initialTrip);
+   setTitleDraft(initialTrip.title);
+ }, [initialTrip]);
+
+ /* ギャラリーは、コマではなく実際にアップロードされた写真を並べます。
+    コマの画像は生成された絵なので、写真として数えると合いません。 */
+ const galleryPhotos = trip.photoItems ?? [];
+
+ const handleRename = async () => {
+   const next = titleDraft.trim();
+   if (!next || next === trip.title) {
+     setIsRenaming(false);
+     return;
+   }
+   try {
+     await renameTrip(trip.id, next);
+     setTrip((prev) => ({ ...prev, title: next }));
+     setRenameError(null);
+     setIsRenaming(false);
+   } catch (e) {
+     setRenameError(String(e));
+   }
+ };
+
  // Editing state for diary entries
  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
  const [editingText, setEditingText] = useState('');
  
- // Interactive Q&A state for each entry
- const [qaAnswers, setQaAnswers] = useState<Record<string, string>>({
- 'entry-1': '新幹線のホームで無事合流できて、みんな朝から元気いっぱいだった',
- 'entry-3': '3人で違うパフェを頼んで少しずつ交換した',
- 'entry-6': 'ライトアップされた千本鳥居が神秘的で、涼しくて歩きやすかった',
- });
- const [qaInputTexts, setQaInputTexts] = useState<Record<string, string>>({});
- const [activeQaId, setActiveQaId] = useState<string | null>(null);
-
  // Filter entries if member filter is selected
  const displayedEntries = trip.entries.filter((entry) => {
  if (selectedMemberFilter === 'all') return true;
@@ -68,58 +91,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  setEditingEntryId(null);
  };
 
- // AI Rewriting / Tone adjustment
- const handleAiToneChange = (entryId: string, tone: 'funny' | 'short' | 'emotional' | 'simple') => {
- const entry = trip.entries.find((e) => e.id === entryId);
- if (!entry) return;
-
- let newText = entry.aiDiaryText;
- if (tone === 'emotional') {
- newText = `【心に残るひととき】\n${entry.location}で過ごした時間は、写真を見返すたびに鮮やかに蘇ります。3人で交わした何気ない会話や笑顔が、何よりもかけがえのない宝物になりました。`;
- } else if (tone === 'funny') {
- newText = `【爆笑エピソード】\n${entry.location}にて！みんなテンションMAXで笑いが止まらないハプニング発生！この瞬間をカメラに収められて本当に良かった（笑）！`;
- } else if (tone === 'short') {
- newText = `${entry.time}、${entry.location}に到着。みんなで記念撮影をして楽しい時間を過ごしました。`;
- } else if (tone === 'simple') {
- newText = `${entry.location}を訪問。\n天候にも恵まれ、思い出に残る一枚を撮影することができました。`;
- }
-
- setTrip((prev) => ({
- ...prev,
- entries: prev.entries.map((e) => 
- e.id === entryId ? { ...e, aiDiaryText: newText } : e
- ),
- }));
- };
-
- // Handle Q&A answer submission to enrich diary text factually
- const handleAnswerSubmit = (entryId: string) => {
- const answer = qaInputTexts[entryId]?.trim();
- if (!answer) return;
-
- setQaAnswers((prev) => ({ ...prev, [entryId]: answer }));
- 
- // Automatically update the AI diary text with the user's factual input
- setTrip((prev) => ({
- ...prev,
- entries: prev.entries.map((e) => {
- if (e.id === entryId) {
- const updatedDiary = `${e.aiDiaryText}\n（エピソード：${answer}）`;
- return {
- ...e,
- aiDiaryText: updatedDiary,
- userAnswer: answer,
- isAnswered: true,
- };
- }
- return e;
- }),
- }));
-
- setQaInputTexts((prev) => ({ ...prev, [entryId]: '' }));
- setActiveQaId(null);
- };
-
  const getHighlightIcon = (type: TripHighlight['type']) => {
  switch (type) {
  case 'laugh':
@@ -145,6 +116,30 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  bestShotDescription: '青空と緑の山並みがどこまでも広がり、3人で見上げたこの日の象徴的な一枚です。',
  bestShotPhotographer: '田中さん',
  };
+
+ /* 表示用のまとめ。数字は summaryStats、名前は trip の中身から作ります */
+ const spotRange =
+   trip.spots.length === 0
+     ? '記録なし'
+     : trip.spots.length === 1
+       ? trip.spots[0].name
+       : `${trip.spots[0].name}〜${trip.spots[trip.spots.length - 1].name}`;
+
+ const timeRange = summary.travelDuration || '';
+
+ /* 開始と終了の時刻から所要時間を作る */
+ const durationLabel = (() => {
+   const m = timeRange.match(/(\d{1,2}):(\d{2})\D+?(\d{1,2}):(\d{2})/);
+   if (!m) return timeRange || '—';
+   const diff =
+     (Number(m[3]) * 60 + Number(m[4])) - (Number(m[1]) * 60 + Number(m[2]));
+   if (diff <= 0) return timeRange;
+   const h = Math.floor(diff / 60);
+   const mm = diff % 60;
+   return h > 0 ? `約${h}時間${mm > 0 ? `${mm}分` : ''}` : `約${mm}分`;
+ })();
+
+ const memberNames = trip.members.map((m) => m.name).join('・') || '記録なし';
 
  return (
  <div className="pb-28 md:pb-16 max-w-5xl mx-auto px-4 sm:px-6 pt-2 md:pt-4 font-sans text-slate-900">
@@ -201,9 +196,50 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
 
  {/* Cover Titles */}
  <div className="absolute bottom-6 left-6 right-6 text-white">
- <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white mb-1.5">
- {trip.title}
- </h1>
+ {isRenaming ? (
+   <div className="mb-1.5 flex flex-wrap items-center gap-2">
+     <input
+       autoFocus
+       value={titleDraft}
+       onChange={(e) => setTitleDraft(e.target.value)}
+       onKeyDown={(e) => {
+         if (e.key === "Enter") void handleRename();
+         if (e.key === "Escape") { setTitleDraft(trip.title); setIsRenaming(false); }
+       }}
+       className="min-w-0 flex-1 px-3 py-1.5 rounded-xl bg-white/95 text-slate-900 text-xl sm:text-2xl font-extrabold outline-none focus:ring-2 focus:ring-blue-400"
+     />
+     <button
+       onClick={() => void handleRename()}
+       className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+     >
+       保存
+     </button>
+     <button
+       onClick={() => { setTitleDraft(trip.title); setIsRenaming(false); setRenameError(null); }}
+       className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold cursor-pointer"
+     >
+       やめる
+     </button>
+   </div>
+ ) : (
+   <div className="mb-1.5 flex items-center gap-2">
+     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
+       {trip.title}
+     </h1>
+     <button
+       onClick={() => setIsRenaming(true)}
+       aria-label="日記の名前を変える"
+       title="名前を変える"
+       className="shrink-0 p-1.5 rounded-lg bg-white/15 hover:bg-white/30 transition-colors cursor-pointer"
+     >
+       <Edit3 className="w-4 h-4 text-white" />
+     </button>
+   </div>
+ )}
+
+ {renameError && (
+   <p className="mb-1.5 text-[11px] text-rose-200">{renameError}</p>
+ )}
  <p className="text-sm sm:text-base text-white/90 font-medium">
  {trip.subtitle}
  </p>
@@ -294,7 +330,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  }`}
  >
  <ImageIcon className="w-4 h-4" />
- <span>写真 ({trip.entries.length}枚)</span>
+ <span>写真 ({galleryPhotos.length}枚)</span>
  </button>
 
 
@@ -323,8 +359,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <section className="relative pl-6 sm:pl-10 space-y-8 sm:space-y-12 before:absolute before:left-3 sm:before:left-5 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-blue-500 before:to-blue-600">
  {displayedEntries.map((entry, index) => {
  const isEditing = editingEntryId === entry.id;
- const isQaOpen = activeQaId === entry.id;
- const hasQaAnswer = !!entry.userAnswer || !!qaAnswers[entry.id];
 
  return (
  <div
@@ -445,46 +479,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  )}
  </div>
 
- {/* 8. AI文章のトーン変更ボタン (エモい・面白い・短く・シンプル) */}
- <div className="pt-2 border-t border-slate-100">
- <div className="flex items-center justify-between mb-1.5">
- <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
- <RefreshCw className="w-3 h-3 text-blue-600" />
- <span>AIで文章の雰囲気を変更:</span>
- </span>
- </div>
- <div className="flex items-center gap-1.5 flex-wrap">
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'emotional')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-slate-200"
- >
-  エモい文章に
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'funny')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-blue-100"
- >
-  もっと面白く
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'short')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-blue-100"
- >
-  短くする
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'simple')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors cursor-pointer"
- >
-  シンプルに
- </button>
- </div>
- </div>
-
  
  </div>
  </div>
@@ -512,14 +506,14 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.visitedPlacesCount}
  <span className="ml-2 text-sm font-normal text-slate-600">箇所</span>
  </div>
- <div className="text-xs text-slate-400 mt-3 truncate">京都駅〜伏見稲荷</div>
+ <div className="text-xs text-slate-400 mt-3 truncate">{spotRange}</div>
  </div>
 
  {/* 2. 旅行時間 */}
  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
  <div className="text-sm text-slate-600 font-medium mb-3">旅行時間</div>
- <div className="text-2xl font-bold text-red-600">約9時間15分</div>
- <div className="text-xs text-slate-400 mt-3">10:05 〜 19:20</div>
+ <div className="text-2xl font-bold text-red-600">{durationLabel}</div>
+ <div className="text-xs text-slate-400 mt-3">{timeRange}</div>
  </div>
 
  {/* 3. 撮影した写真 */}
@@ -529,7 +523,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.totalPhotosCount}
  <span className="ml-2 text-sm font-normal text-slate-600">枚</span>
  </div>
- <div className="text-xs text-slate-400 mt-3">3人で集約</div>
+ <div className="text-xs text-slate-400 mt-3">{summary.membersCount}人で集約</div>
  </div>
 
  {/* 4. 参加メンバー */}
@@ -539,7 +533,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {summary.membersCount}
  <span className="ml-2 text-sm font-normal text-slate-600">人</span>
  </div>
- <div className="text-xs text-slate-400 mt-3 truncate">山下・田中・佐藤</div>
+ <div className="text-xs text-slate-400 mt-3 truncate">{memberNames}</div>
  </div>
  </div>
  </section>
@@ -552,7 +546,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
  <div>
  <h2 className="text-xl font-bold text-slate-800">
- 旅行写真ギャラリー ({trip.entries.length}枚)
+ 旅行写真ギャラリー ({galleryPhotos.length}枚)
  </h2>
  <p className="text-xs text-slate-500 mt-0.5">
  メンバー全員が撮影した写真を時系列で表示しています
@@ -571,16 +565,16 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
 
  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
- {trip.entries.map((entry) => (
+ {galleryPhotos.map((entry) => (
  <div
  key={entry.id}
- onClick={() => onSelectPhotoLightbox(entry.photoUrl, entry.aiDiaryText, entry.location)}
+ onClick={() => onSelectPhotoLightbox(entry.url, entry.locationName, entry.locationName)}
  className="group cursor-pointer rounded-2xl overflow-hidden border border-slate-200 shadow-2xs hover:shadow-lg transition-all bg-white flex flex-col"
  >
  <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
  <img
- src={entry.photoUrl}
- alt={entry.location}
+ src={entry.url}
+ alt={entry.locationName}
  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
  />
  <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-xs text-white text-[10px] font-mono">
@@ -592,8 +586,8 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
  </div>
  <div className="p-3.5">
- <h4 className="text-xs font-bold text-slate-800 truncate">{entry.location}</h4>
- <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{entry.aiDiaryText}</p>
+ <h4 className="text-xs font-bold text-slate-800 truncate">{entry.locationName || '場所の記録なし'}</h4>
+ <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{entry.caption || `${entry.time} に撮影`}</p>
  </div>
  </div>
  ))}

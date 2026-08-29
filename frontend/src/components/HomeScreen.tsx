@@ -18,7 +18,6 @@ interface HomeScreenProps {
   onSelectTrip: (trip: Trip) => void;
   onNewTripClick: () => void;
   onViewAllMemories: () => void;
-  onProfileClick: () => void;
 
   userName: string;
   onLogout: () => void;
@@ -29,15 +28,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onSelectTrip,
   onNewTripClick,
   onViewAllMemories,
-  onProfileClick,
   userName,
   onLogout,
 }) => {
   const featuredTrip = pastTrips[0];
-
-  const handleProfileClick = () => {
-    onProfileClick();
-  };
 
   const initial = userName.length > 0 ? userName.charAt(0) : '旅';
 
@@ -92,11 +86,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           {/* Login / Profile */}
           <div className="flex flex-col items-center gap-1.5 shrink-0">
-            <button
-              onClick={handleProfileClick}
-              id="home-profile-btn"
-              aria-label="プロフィールを開く"
-              title="プロフィール" 
+            <div
+              id="home-profile-avatar"
               className="
                 w-12
                 h-12
@@ -110,13 +101,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 flex
                 items-center
                 justify-center
-                hover:bg-teal-600
-                hover:border-teal-600
-                hover:scale-105
-                active:scale-95
                 transition-all
                 duration-200
-                cursor-pointer
               "
             >
               <span
@@ -129,7 +115,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               >
                 {initial}
               </span>
-            </button>
+            </div>
 
             <span
               className="
@@ -523,7 +509,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         <Camera className="w-3.5 h-3.5 text-white" />
 
                         <span>
-                          10:05 京都駅（山下さん撮影）
+                          {featuredTrip.entries[0]
+                            ? `${featuredTrip.entries[0].time} ${featuredTrip.entries[0].location}（${featuredTrip.entries[0].contributor.name}撮影）`
+                            : '写真日記'}
                         </span>
                       </div>
 
@@ -536,7 +524,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         "
                       >
                         {featuredTrip.entries[0]?.aiDiaryText ||
-                          '京都駅に到着！今日はいよいよ3人で京都旅行。駅に着いた瞬間からみんなテンションが上がっていました。'}
+                          'まだ日記ができていません。生成が終わると、ここに文章が入ります。'}
                       </p>
                     </div>
 
@@ -730,6 +718,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
+
+          {/* まだ1件も無いとき */}
+          {pastTrips.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-10 text-center">
+              <p className="text-sm font-bold text-slate-700">
+                まだ旅の記録がありません
+              </p>
+              <p className="mt-1.5 text-xs text-slate-500">
+                写真をアップロードすると、ここに並びます。
+              </p>
+              <button
+                onClick={onNewTripClick}
+                className="mt-5 px-5 py-2.5 rounded-xl bg-[#003B95] text-white text-xs font-bold hover:bg-[#002F75] transition-colors cursor-pointer"
+              >
+                写真をアップロードする
+              </button>
+            </div>
+          )}
 
           {/* Cards */}
           <div
