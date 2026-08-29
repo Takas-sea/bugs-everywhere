@@ -16,7 +16,6 @@ import { UploadScreen } from './components/UploadScreen';
 import { GeneratingScreen } from './components/GeneratingScreen';
 import { DiaryDetailScreen } from './components/DiaryDetailScreen';
 import { MemoriesListScreen } from './components/MemoriesListScreen';
-import { ProfileScreen } from './components/ProfileScreen';
 import { InviteModal } from './components/InviteModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
 
@@ -318,7 +317,6 @@ export default function App() {
             onSelectTrip={handleSelectTrip}
             onNewTripClick={handleStartCreateTrip}
             onViewAllMemories={() => changeScreen('memories')}
-            onProfileClick={() => changeScreen('profile')}
             userName={userName}
             onLogout={handleLogout}
           />
@@ -385,9 +383,6 @@ export default function App() {
           />
         )}
 
-        {/* ===================== Profile ===================== */}
-
-        {activeScreen === 'profile' && <ProfileScreen />}
       </main>
 
       <InviteModal

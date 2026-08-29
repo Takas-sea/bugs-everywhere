@@ -18,7 +18,6 @@ interface HomeScreenProps {
   onSelectTrip: (trip: Trip) => void;
   onNewTripClick: () => void;
   onViewAllMemories: () => void;
-  onProfileClick: () => void;
 
   userName: string;
   onLogout: () => void;
@@ -29,15 +28,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onSelectTrip,
   onNewTripClick,
   onViewAllMemories,
-  onProfileClick,
   userName,
   onLogout,
 }) => {
   const featuredTrip = pastTrips[0];
-
-  const handleProfileClick = () => {
-    onProfileClick();
-  };
 
   const initial = userName.length > 0 ? userName.charAt(0) : '旅';
 
@@ -92,11 +86,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           {/* Login / Profile */}
           <div className="flex flex-col items-center gap-1.5 shrink-0">
-            <button
-              onClick={handleProfileClick}
-              id="home-profile-btn"
-              aria-label="プロフィールを開く"
-              title="プロフィール" 
+            <div
+              id="home-profile-avatar"
               className="
                 w-12
                 h-12
@@ -110,13 +101,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 flex
                 items-center
                 justify-center
-                hover:bg-teal-600
-                hover:border-teal-600
-                hover:scale-105
-                active:scale-95
                 transition-all
                 duration-200
-                cursor-pointer
               "
             >
               <span
@@ -129,7 +115,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               >
                 {initial}
               </span>
-            </button>
+            </div>
 
             <span
               className="

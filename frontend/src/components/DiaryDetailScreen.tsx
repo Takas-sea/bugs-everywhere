@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
  Download, UserPlus, Heart, Bookmark, ArrowLeft,
- Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check, RefreshCw,
+ Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check,
  MessageCircle, Send, Plus, Flame, Sparkle
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
@@ -32,15 +32,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
  const [editingText, setEditingText] = useState('');
  
- // Interactive Q&A state for each entry
- const [qaAnswers, setQaAnswers] = useState<Record<string, string>>({
- 'entry-1': '新幹線のホームで無事合流できて、みんな朝から元気いっぱいだった',
- 'entry-3': '3人で違うパフェを頼んで少しずつ交換した',
- 'entry-6': 'ライトアップされた千本鳥居が神秘的で、涼しくて歩きやすかった',
- });
- const [qaInputTexts, setQaInputTexts] = useState<Record<string, string>>({});
- const [activeQaId, setActiveQaId] = useState<string | null>(null);
-
  // Filter entries if member filter is selected
  const displayedEntries = trip.entries.filter((entry) => {
  if (selectedMemberFilter === 'all') return true;
@@ -66,58 +57,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  ),
  }));
  setEditingEntryId(null);
- };
-
- // AI Rewriting / Tone adjustment
- const handleAiToneChange = (entryId: string, tone: 'funny' | 'short' | 'emotional' | 'simple') => {
- const entry = trip.entries.find((e) => e.id === entryId);
- if (!entry) return;
-
- let newText = entry.aiDiaryText;
- if (tone === 'emotional') {
- newText = `【心に残るひととき】\n${entry.location}で過ごした時間は、写真を見返すたびに鮮やかに蘇ります。3人で交わした何気ない会話や笑顔が、何よりもかけがえのない宝物になりました。`;
- } else if (tone === 'funny') {
- newText = `【爆笑エピソード】\n${entry.location}にて！みんなテンションMAXで笑いが止まらないハプニング発生！この瞬間をカメラに収められて本当に良かった（笑）！`;
- } else if (tone === 'short') {
- newText = `${entry.time}、${entry.location}に到着。みんなで記念撮影をして楽しい時間を過ごしました。`;
- } else if (tone === 'simple') {
- newText = `${entry.location}を訪問。\n天候にも恵まれ、思い出に残る一枚を撮影することができました。`;
- }
-
- setTrip((prev) => ({
- ...prev,
- entries: prev.entries.map((e) => 
- e.id === entryId ? { ...e, aiDiaryText: newText } : e
- ),
- }));
- };
-
- // Handle Q&A answer submission to enrich diary text factually
- const handleAnswerSubmit = (entryId: string) => {
- const answer = qaInputTexts[entryId]?.trim();
- if (!answer) return;
-
- setQaAnswers((prev) => ({ ...prev, [entryId]: answer }));
- 
- // Automatically update the AI diary text with the user's factual input
- setTrip((prev) => ({
- ...prev,
- entries: prev.entries.map((e) => {
- if (e.id === entryId) {
- const updatedDiary = `${e.aiDiaryText}\n（エピソード：${answer}）`;
- return {
- ...e,
- aiDiaryText: updatedDiary,
- userAnswer: answer,
- isAnswered: true,
- };
- }
- return e;
- }),
- }));
-
- setQaInputTexts((prev) => ({ ...prev, [entryId]: '' }));
- setActiveQaId(null);
  };
 
  const getHighlightIcon = (type: TripHighlight['type']) => {
@@ -347,8 +286,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <section className="relative pl-6 sm:pl-10 space-y-8 sm:space-y-12 before:absolute before:left-3 sm:before:left-5 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-blue-500 before:to-blue-600">
  {displayedEntries.map((entry, index) => {
  const isEditing = editingEntryId === entry.id;
- const isQaOpen = activeQaId === entry.id;
- const hasQaAnswer = !!entry.userAnswer || !!qaAnswers[entry.id];
 
  return (
  <div
@@ -467,46 +404,6 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </p>
  </div>
  )}
- </div>
-
- {/* 8. AI文章のトーン変更ボタン (エモい・面白い・短く・シンプル) */}
- <div className="pt-2 border-t border-slate-100">
- <div className="flex items-center justify-between mb-1.5">
- <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
- <RefreshCw className="w-3 h-3 text-blue-600" />
- <span>AIで文章の雰囲気を変更:</span>
- </span>
- </div>
- <div className="flex items-center gap-1.5 flex-wrap">
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'emotional')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-slate-200"
- >
-  エモい文章に
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'funny')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-blue-100"
- >
-  もっと面白く
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'short')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-800 font-medium transition-colors cursor-pointer border border-blue-100"
- >
-  短くする
- </button>
- <button
- type="button"
- onClick={() => handleAiToneChange(entry.id, 'simple')}
- className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors cursor-pointer"
- >
-  シンプルに
- </button>
- </div>
  </div>
 
  
