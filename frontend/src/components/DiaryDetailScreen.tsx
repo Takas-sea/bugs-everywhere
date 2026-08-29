@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
  Download, UserPlus, Heart, Bookmark, ArrowLeft,
@@ -6,6 +6,7 @@ import {
  MessageCircle, Send, Plus, Flame, Sparkle
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
+import { renameTrip } from '../lib/trips';
 
 interface DiaryDetailScreenProps {
  trip: Trip;
@@ -27,6 +28,37 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  const [selectedMemberFilter, setSelectedMemberFilter] = useState<string>('all');
  const [selectedMapSpot, setSelectedMapSpot] = useState<MapSpot | null>(trip.spots[0] || null);
  const [copiedLink, setCopiedLink] = useState(false);
+
+ /* 名前の編集 */
+ const [isRenaming, setIsRenaming] = useState(false);
+ const [titleDraft, setTitleDraft] = useState(initialTrip.title);
+ const [renameError, setRenameError] = useState<string | null>(null);
+
+ /* 親が読み直した内容をここにも反映する（生成の進みを取り込むため） */
+ useEffect(() => {
+   setTrip(initialTrip);
+   setTitleDraft(initialTrip.title);
+ }, [initialTrip]);
+
+ /* ギャラリーは、コマではなく実際にアップロードされた写真を並べます。
+    コマの画像は生成された絵なので、写真として数えると合いません。 */
+ const galleryPhotos = trip.photoItems ?? [];
+
+ const handleRename = async () => {
+   const next = titleDraft.trim();
+   if (!next || next === trip.title) {
+     setIsRenaming(false);
+     return;
+   }
+   try {
+     await renameTrip(trip.id, next);
+     setTrip((prev) => ({ ...prev, title: next }));
+     setRenameError(null);
+     setIsRenaming(false);
+   } catch (e) {
+     setRenameError(String(e));
+   }
+ };
 
  // Editing state for diary entries
  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
@@ -164,9 +196,50 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
 
  {/* Cover Titles */}
  <div className="absolute bottom-6 left-6 right-6 text-white">
- <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white mb-1.5">
- {trip.title}
- </h1>
+ {isRenaming ? (
+   <div className="mb-1.5 flex flex-wrap items-center gap-2">
+     <input
+       autoFocus
+       value={titleDraft}
+       onChange={(e) => setTitleDraft(e.target.value)}
+       onKeyDown={(e) => {
+         if (e.key === "Enter") void handleRename();
+         if (e.key === "Escape") { setTitleDraft(trip.title); setIsRenaming(false); }
+       }}
+       className="min-w-0 flex-1 px-3 py-1.5 rounded-xl bg-white/95 text-slate-900 text-xl sm:text-2xl font-extrabold outline-none focus:ring-2 focus:ring-blue-400"
+     />
+     <button
+       onClick={() => void handleRename()}
+       className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold cursor-pointer"
+     >
+       保存
+     </button>
+     <button
+       onClick={() => { setTitleDraft(trip.title); setIsRenaming(false); setRenameError(null); }}
+       className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold cursor-pointer"
+     >
+       やめる
+     </button>
+   </div>
+ ) : (
+   <div className="mb-1.5 flex items-center gap-2">
+     <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-white">
+       {trip.title}
+     </h1>
+     <button
+       onClick={() => setIsRenaming(true)}
+       aria-label="日記の名前を変える"
+       title="名前を変える"
+       className="shrink-0 p-1.5 rounded-lg bg-white/15 hover:bg-white/30 transition-colors cursor-pointer"
+     >
+       <Edit3 className="w-4 h-4 text-white" />
+     </button>
+   </div>
+ )}
+
+ {renameError && (
+   <p className="mb-1.5 text-[11px] text-rose-200">{renameError}</p>
+ )}
  <p className="text-sm sm:text-base text-white/90 font-medium">
  {trip.subtitle}
  </p>
@@ -257,7 +330,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  }`}
  >
  <ImageIcon className="w-4 h-4" />
- <span>写真 ({trip.entries.length}枚)</span>
+ <span>写真 ({galleryPhotos.length}枚)</span>
  </button>
 
 
@@ -473,7 +546,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
  <div>
  <h2 className="text-xl font-bold text-slate-800">
- 旅行写真ギャラリー ({trip.entries.length}枚)
+ 旅行写真ギャラリー ({galleryPhotos.length}枚)
  </h2>
  <p className="text-xs text-slate-500 mt-0.5">
  メンバー全員が撮影した写真を時系列で表示しています
@@ -492,16 +565,16 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
 
  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
- {trip.entries.map((entry) => (
+ {galleryPhotos.map((entry) => (
  <div
  key={entry.id}
- onClick={() => onSelectPhotoLightbox(entry.photoUrl, entry.aiDiaryText, entry.location)}
+ onClick={() => onSelectPhotoLightbox(entry.url, entry.locationName, entry.locationName)}
  className="group cursor-pointer rounded-2xl overflow-hidden border border-slate-200 shadow-2xs hover:shadow-lg transition-all bg-white flex flex-col"
  >
  <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
  <img
- src={entry.photoUrl}
- alt={entry.location}
+ src={entry.url}
+ alt={entry.locationName}
  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
  />
  <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-black/60 backdrop-blur-xs text-white text-[10px] font-mono">
@@ -513,8 +586,8 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </div>
  </div>
  <div className="p-3.5">
- <h4 className="text-xs font-bold text-slate-800 truncate">{entry.location}</h4>
- <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{entry.aiDiaryText}</p>
+ <h4 className="text-xs font-bold text-slate-800 truncate">{entry.locationName || '場所の記録なし'}</h4>
+ <p className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{entry.caption || `${entry.time} に撮影`}</p>
  </div>
  </div>
  ))}

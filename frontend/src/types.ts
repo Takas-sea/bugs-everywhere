@@ -95,6 +95,8 @@ export interface Trip {
   tags: string[];
   isSample?: boolean;
   summaryStats?: TripSummaryStats;
+  /** 実際にアップロードされた写真そのもの（コマではなく1枚ずつ） */
+  photoItems?: PhotoItem[];
 }
 
 export type ActiveScreen =

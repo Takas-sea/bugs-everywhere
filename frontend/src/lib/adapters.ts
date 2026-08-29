@@ -269,6 +269,28 @@ export async function toMapSpots(
 //  Trip をまるごと組み立てる
 // ================================================================
 
+/** 写真の撮影日のうち、枚数が一番多い日を返す */
+function mainDateOf(photos: PhotoRow[], fallbackIso: string): string {
+  const counts = new Map<string, number>();
+  for (const p of photos) {
+    if (!p.captured_at) continue;
+    const d = p.captured_at.slice(0, 10);
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  if (counts.size === 0) return fallbackIso.slice(0, 10);
+
+  let best = "";
+  let bestCount = -1;
+  for (const [d, n] of counts) {
+    // 同数なら新しい日を採用する
+    if (n > bestCount || (n === bestCount && d > best)) {
+      best = d;
+      bestCount = n;
+    }
+  }
+  return best;
+}
+
 function summarize(
   entries: DiaryEntry[],
   spots: MapSpot[],
@@ -325,7 +347,9 @@ export async function loadTrip(
   const coverImage = entries.find((e) => e.photoUrl)?.photoUrl ?? "";
   const title = trip.title ?? "旅の記録";
   const destination = spots[0]?.name ?? "";
-  const date = (photos[0]?.captured_at ?? trip.created_at).slice(0, 10);
+  // 一番多く写っている日を「その旅の日」にします。
+  // 一番古い写真をそのまま使うと、混ざった1枚に引っぱられます。
+  const date = mainDateOf(photos, trip.created_at);
 
   return {
     id: trip.id,
@@ -344,6 +368,7 @@ export async function loadTrip(
       new Set(photos.map((p) => p.location_name).filter((v): v is string => !!v)),
     ).slice(0, 5),
     summaryStats: summarize(entries, spots, photos, coverImage, title, contributor),
+    photoItems: await toPhotoItems(photos, { contributor }),
   };
 }
 
