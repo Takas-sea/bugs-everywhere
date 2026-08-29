@@ -523,7 +523,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         <Camera className="w-3.5 h-3.5 text-white" />
 
                         <span>
-                          10:05 京都駅（山下さん撮影）
+                          {featuredTrip.entries[0]
+                            ? `${featuredTrip.entries[0].time} ${featuredTrip.entries[0].location}（${featuredTrip.entries[0].contributor.name}撮影）`
+                            : '写真日記'}
                         </span>
                       </div>
 
@@ -536,7 +538,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                         "
                       >
                         {featuredTrip.entries[0]?.aiDiaryText ||
-                          '京都駅に到着！今日はいよいよ3人で京都旅行。駅に着いた瞬間からみんなテンションが上がっていました。'}
+                          'まだ日記ができていません。生成が終わると、ここに文章が入ります。'}
                       </p>
                     </div>
 

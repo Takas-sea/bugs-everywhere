@@ -44,7 +44,12 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
           if (!cancelled) setTripId(currentTrip.id);
           return;
         }
-        const trip = await createTrip(currentTrip.title);
+        // モックの旅行から来た場合、そのタイトル（「京都旅行 2026」など）を
+        // 使うと本物の旅行が全部その名前になってしまうので、日付から作ります。
+        const now = new Date();
+        const fallbackTitle =
+          `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日の記録`;
+        const trip = await createTrip(fallbackTitle);
         if (!cancelled) setTripId(trip.id);
       } catch (e) {
         if (!cancelled) setErrors([`旅行の作成に失敗しました: ${String(e)}`]);
