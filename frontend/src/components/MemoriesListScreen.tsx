@@ -41,7 +41,6 @@ export const MemoriesListScreen: React.FC<MemoriesListScreenProps> = ({
             旅の写真日記一覧
           </h1>
           <p className="text-sm text-slate-600 font-diary mt-1">
-            これまでにAIと作った大切な旅行写真日記 ({trips.length}冊)
           </p>
         </div>
 

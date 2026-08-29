@@ -81,7 +81,7 @@ export interface TripSummaryStats {
 export interface Trip {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   date: string;
   destination: string;
   coverImage: string;

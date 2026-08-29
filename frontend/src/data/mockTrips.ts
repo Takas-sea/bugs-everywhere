@@ -5,23 +5,18 @@ export const SAMPLE_MEMBERS: Contributor[] = [
     id: 'user_yamashita',
     name: '山下さん',
     avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=200&h=200&q=80',
-    role: 'グルメ担当',
-    photoCount: 16,
     isOwner: true,
   },
   {
     id: 'user_tanaka',
     name: '田中さん',
     avatar: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=200&h=200&q=80',
-    role: '写真・ナビ',
-    photoCount: 14,
   },
   {
     id: 'user_sato',
     name: '佐藤さん',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&h=200&q=80',
-    role: 'タイムキーパー',
-    photoCount: 12,
+   
   },
 ];
 
@@ -104,7 +99,6 @@ export const SAMPLE_UPLOAD_PHOTOS: PhotoItem[] = [
 export const MOCK_KYOTO_TRIP: Trip = {
   id: 'kyoto-2026-08',
   title: '京都旅行 2026',
-  subtitle: '3人の写真を集めて作った時系列写真アルバム＆旅行日記',
   date: '2026年8月28日',
   destination: '京都（東山・祇園・伏見）',
   coverImage: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1600&q=80',
@@ -243,12 +237,12 @@ export const MOCK_KYOTO_TRIP: Trip = {
   entries: [
     {
       id: 'entry-1',
-      photoId: 'photo-kyoto-1',
+      photoId: 'photo-1',
+   
       time: '10:05',
       title: '京都駅に到着！今日はいよいよ3人で京都旅行',
       location: '京都駅',
-      weather: '晴れ ☀️',
-      feeling: 'わくわく',
+      weather: '晴れ ',
       photoUrl: 'https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[0], // 山下
       aiDiaryText: '京都駅に到着！\n今日はいよいよ3人で京都旅行。\n駅に着いた瞬間からみんなテンションが上がっていました。新幹線口を出て、まずは京都タワーをバックに記念撮影！',
@@ -263,8 +257,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
       time: '11:32',
       title: '最初に向かったのは清水寺・舞台からの絶景',
       location: '清水寺',
-      weather: '快晴 ☀️',
-      feeling: '感動',
+      weather: '快晴 ',
       photoUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[1], // 田中
       aiDiaryText: '最初に向かったのは清水寺。\n坂道を歩くのは大変だったけど、3人で話しながら歩いていたらあっという間。\n清水の舞台から見た景色が今日最初の絶景でした。青空と緑の山並みがどこまでも広がっていました。',
@@ -279,8 +272,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
       time: '13:15',
       title: '歩き疲れたところで抹茶パフェ休憩',
       location: '抹茶スイーツ (祇園 辻利)',
-      weather: '快晴 ☀️',
-      feeling: '大満足',
+      weather: '快晴 ',
       photoUrl: 'https://images.unsplash.com/photo-1557142046-c704a3adf364?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[2], // 佐藤
       aiDiaryText: '歩き疲れたところで抹茶パフェ休憩。\nみんなで違うものを頼んで、少しずつ交換しました。\n濃厚な抹茶アイスとモチモチの白玉が歩き疲れた体に染み渡りました。',
@@ -295,8 +287,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
       time: '15:15',
       title: '朱塗りの八坂神社とおみくじ勝負',
       location: '八坂神社',
-      weather: '晴れ ☀️',
-      feeling: '大爆笑',
+      weather: '晴れ ',
       photoUrl: 'https://images.unsplash.com/photo-1578637387939-43c525550085?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[0], // 山下
       aiDiaryText: '続いて訪れたのは八坂神社。\n鮮やかな朱色の門をくぐり、舞殿の提灯を眺めながらお参り。\nおみくじを引いたら田中さんが大吉、山下さんがまさかの凶で大爆笑！みんなで厄落としを祈願しました。',
@@ -311,8 +302,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
       time: '17:40',
       title: '夕暮れの祇園散歩・石畳と情緒ある町並み',
       location: '祇園 (花見小路)',
-      weather: '夕焼け 🌅',
-      feeling: '癒やし',
+      weather: '夕焼け ',
       photoUrl: 'https://images.unsplash.com/photo-1528360983277-13d401cdc186?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[1], // 田中
       aiDiaryText: '夕方の祇園・花見小路を散歩。\n石畳に夕暮れの柔らかい光が差し込み、昼とは違った落ち着いた雰囲気に。\n3人で並んで歩きながら、今日1日の思い出を語り合いました。',
@@ -327,8 +317,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
       time: '19:20',
       title: 'ライトアップされた夜の千本鳥居',
       location: '伏見稲荷大社',
-      weather: '星空 🌙',
-      feeling: '感動',
+      weather: '星空 ',
       photoUrl: 'https://images.unsplash.com/photo-1478436127897-769e00d7c583?auto=format&fit=crop&w=1200&q=80',
       contributor: SAMPLE_MEMBERS[2], // 佐藤
       aiDiaryText: '旅の締めくくりは夜の伏見稲荷大社へ。\nライトアップされた千本鳥居は神秘的な朱色のトンネルのよう。\n昼間の賑やかさとは異なる静寂の中、3人の京都旅行の最高のフィナーレになりました。',
