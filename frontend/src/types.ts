@@ -26,6 +26,8 @@ export interface PhotoItem {
 export interface DiaryEntry {
   id: string;
   photoId: string;
+  /** どのコマ（scenes の行）かを表すID。場所名の編集に使います */
+  sceneId?: string;
   time: string;
   title: string;
   location: string;

@@ -39,6 +39,8 @@ export type SceneRow = {
   photo_ids: string[];
   is_gap: boolean;
   summary: string | null;
+  /** 手で直した場所名。あればこちらを優先して表示する */
+  place: string | null;
   created_at: string;
 };
 

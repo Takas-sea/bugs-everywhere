@@ -26,7 +26,7 @@ const OVERPASS = "https://overpass-api.de/api/interpreter";
 
 const MIN_INTERVAL_MS = 1100; // 利用規約：1秒に1回まで
 const CACHE_PRECISION = 3; // 小数3桁 ≒ 110m。同じスポットは1回で済ませる
-const LANDMARK_RADIUS_M = 400; // この距離までのスポットを「その場所」とみなす
+const LANDMARK_RADIUS_M = 120; // 点で登録された施設は、ほぼ目の前にいるときだけ採用する
 
 export type Place = {
   /** 具体的な場所。「東大寺」「大豆山町」など。取れなければ null */
@@ -75,6 +75,52 @@ type OverpassElement = {
  * 近くにある名前付きの観光地・史跡・公園・神社仏閣を探して、
  * 一番近いものの名前を返す。
  */
+/**
+ * その座標を「含んでいる」エリアの名前を返す。
+ *
+ * 寺・公園・城のような広い場所は、Overpass が返すのがポリゴンの中心座標なので、
+ * 端に立っていると中心までの距離で負けて、隣の別の施設を拾ってしまいます。
+ * is_in なら「実際に敷地の中にいるか」で判定できるので、こちらを先に試します。
+ */
+async function findContainingArea(lat: number, lng: number): Promise<string | null> {
+  const query = [
+    "[out:json][timeout:15];",
+    `is_in(${lat},${lng})->.a;`,
+    "(",
+    '  area.a["name"]["tourism"];',
+    '  area.a["name"]["historic"];',
+    '  area.a["name"]["leisure"="park"];',
+    '  area.a["name"]["amenity"="place_of_worship"];',
+    ");",
+    "out tags;",
+  ].join("\n");
+
+  const res = await fetch(OVERPASS, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: "data=" + encodeURIComponent(query),
+  });
+  if (!res.ok) return null;
+
+  const json = (await res.json()) as { elements?: OverpassElement[] };
+  const elements = json.elements ?? [];
+
+  // 観光地・史跡を、公園より優先する（「○○公園」より「○○城」のほうが伝わる）
+  const ranked = [...elements].sort((a, b) => rankOf(a) - rankOf(b));
+  for (const el of ranked) {
+    const name = el.tags?.["name:ja"] ?? el.tags?.name;
+    if (name) return name;
+  }
+  return null;
+}
+
+function rankOf(el: OverpassElement): number {
+  const t = el.tags ?? {};
+  if (t.tourism || t.historic) return 0;
+  if (t.amenity === "place_of_worship") return 1;
+  return 2;
+}
+
 async function findLandmark(lat: number, lng: number): Promise<string | null> {
   const around = `${LANDMARK_RADIUS_M},${lat},${lng}`;
   const query = [
@@ -170,8 +216,17 @@ export function reverseGeocode(lat: number, lng: number): Promise<Place> {
     let place: Place = { ...EMPTY };
 
     try {
-      const landmark = await findLandmark(lat, lng);
+      // 1. その場所の中に立っているか
+      let landmark = await findContainingArea(lat, lng);
       await sleep(MIN_INTERVAL_MS);
+
+      // 2. 入っていなければ、すぐ目の前にある施設を探す
+      if (!landmark) {
+        landmark = await findLandmark(lat, lng);
+        await sleep(MIN_INTERVAL_MS);
+      }
+
+      // 3. どちらも無ければ住所（市区町村・町名）
       const addr = await findAddress(lat, lng);
 
       const specific = landmark ?? addr.specific;

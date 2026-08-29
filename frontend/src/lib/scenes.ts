@@ -103,3 +103,24 @@ export async function getPanels(tripId: string): Promise<PanelRow[]> {
   if (error) throw new Error(`コマの取得に失敗しました: ${error.message}`);
   return (data ?? []) as PanelRow[];
 }
+
+/**
+ * コマの場所名を手で直す。
+ *
+ * 写真の EXIF から自動で入れた名前がずれているときに使います。
+ * scenes.place に入れて、表示ではこちらを優先します。
+ * sql/004_scene_place.sql を実行していないと権限で弾かれます。
+ */
+export async function updateScenePlace(sceneId: string, place: string): Promise<void> {
+  const trimmed = place.trim();
+
+  const { error } = await supabase
+    .from("scenes")
+    .update({ place: trimmed || null })
+    .eq("id", sceneId);
+
+  if (error) {
+    console.error("[updateScenePlace] 場所名の変更に失敗しました", error);
+    throw new Error(`場所名の変更に失敗しました: ${error.message}`);
+  }
+}

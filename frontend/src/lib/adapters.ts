@@ -164,6 +164,9 @@ function firstPhotoOf(scene: SceneRow, photos: PhotoRow[]): PhotoRow | undefined
 
 /** そのシーンの場所名（写真から拾う） */
 function placeOf(scene: SceneRow, photos: PhotoRow[]): string | null {
+  // 手で直した名前があれば、それが正しい
+  if (scene.place) return scene.place;
+
   const ids = new Set(scene.photo_ids);
   for (const p of photos) if (ids.has(p.id) && p.location_name) return p.location_name;
   return null;
@@ -210,6 +213,7 @@ export async function toDiaryEntries(
 
       return {
         id: panel?.id ?? scene.id,
+        sceneId: scene.id,
         photoId: photo?.id ?? "",
         time: hhmmOf(scene.started_at),
         title: scene.is_gap ? GAP_TITLE : (place ?? "この日のひとコマ"),
