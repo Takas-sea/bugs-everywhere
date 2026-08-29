@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services import gemini
+from app.services.supabase import _coerce_to_uuid
 
 
 client = TestClient(app)
@@ -58,8 +59,67 @@ def test_upload_image_tracks_owner_token_and_metadata(monkeypatch):
     assert response.json()["owner_token"] == "user_001"
     assert response.json()["storage_path"] == "user_001/2026-08-28/photo1.jpg"
     assert uploaded["storage_path"] == "user_001/2026-08-28/photo1.jpg"
-    assert inserted[0]["owner_token"] == "user_001"
+    assert inserted[0]["owner_token"] == _coerce_to_uuid("user_001")
     assert inserted[0]["storage_path"] == "user_001/2026-08-28/photo1.jpg"
+
+
+def test_upload_image_analyzes_uploaded_photo_immediately(monkeypatch):
+    prior_update = {}
+
+    class FakeTable:
+        def __init__(self):
+            self.payload = None
+            self._eq_key = None
+            self._eq_value = None
+
+        def insert(self, payload):
+            self.payload = payload
+            return self
+
+        def update(self, payload):
+            self.payload = payload
+            prior_update["payload"] = payload
+            return self
+
+        def eq(self, key, value):
+            self._eq_key = key
+            self._eq_value = value
+            return self
+
+        def execute(self):
+            if self._eq_key == "id":
+                return type("Response", (), {"data": [{"id": self._eq_value, "summary": "寺院で鹿を見た", "events": ["鹿を見た"]}]})()
+            return type("Response", (), {"data": [{"id": "photo-123", "storage_path": "user_001/2026-08-28/photo1.jpg"}]})()
+
+    class FakeStorage:
+        def from_(self, bucket_name):
+            return self
+
+        def upload(self, storage_path, data, file_options=None):
+            return {"path": storage_path}
+
+    class FakeSupabase:
+        def __init__(self):
+            self.storage = FakeStorage()
+            self._table = FakeTable()
+
+        def table(self, name):
+            assert name in {"photos", "trips"}
+            return self._table
+
+    monkeypatch.setattr("app.api.diary.supabase", FakeSupabase())
+    monkeypatch.setattr("app.api.diary.resolve_trip_ids_by_owner_token", lambda owner_token, client=None: [])
+    monkeypatch.setattr("app.api.diary.analyze_images", lambda images, image_names=None: {"summary": "寺院で鹿を見た", "events": ["鹿を見た"]})
+
+    response = client.post(
+        "/upload",
+        params={"owner_token": "user_001", "date": "2026-08-28"},
+        files={"file": ("photo1.jpg", BytesIO(b"abc"), "image/jpeg")},
+    )
+
+    assert response.status_code == 200
+    assert prior_update["payload"]["summary"] == "寺院で鹿を見た"
+    assert prior_update["payload"]["events"] == ["鹿を見た"]
 
 
 def test_list_images_uses_owner_token_query(monkeypatch):
@@ -697,7 +757,7 @@ def test_process_pending_panels_updates_pending_rows_by_mode(monkeypatch):
     assert all("is_gap" not in update for update in scene_updates)
 
 
-def test_generate_diary_illustration_uses_genai_image_model_when_available(monkeypatch):
+def test_generate_diary_illustration_uses_gemini_image_model_when_available(monkeypatch):
     class FakeInlineData:
         data = b"fake-generated-png"
 
@@ -706,9 +766,13 @@ def test_generate_diary_illustration_uses_genai_image_model_when_available(monke
             self.inline_data = FakeInlineData()
             self.text = None
 
+    class FakeContent:
+        def __init__(self):
+            self.parts = [FakePart()]
+
     class FakeCandidate:
         def __init__(self):
-            self.content = type("Content", (), {"parts": [FakePart()]})()
+            self.content = FakeContent()
 
     class FakeResponse:
         def __init__(self):
@@ -722,7 +786,7 @@ def test_generate_diary_illustration_uses_genai_image_model_when_available(monke
         models = FakeModels()
 
     monkeypatch.setattr(gemini, "client", FakeClient())
-    monkeypatch.setattr(gemini, "_model_name", "gemini-3.1-flash-image")
+    monkeypatch.setattr(gemini, "_image_model_name", "gemini-2.0-flash-preview-image-generation")
 
     result = gemini.generate_diary_illustration("寺院で桜を見ました。", ["鹿も見かけました"])
 
@@ -783,15 +847,22 @@ def test_download_day_zip(monkeypatch):
 def test_analyze_images_retries_on_transient_failure(monkeypatch):
     attempts = {"count": 0}
 
-    class FakeResponse:
+    class FakePart:
         text = '{"summary": "ok", "events": ["event1"]}'
 
+    class FakeContent:
+        parts = [FakePart()]
+
+    class FakeCandidate:
+        content = FakeContent()
+
     class FakeModels:
-        def generate_content(self, **kwargs):
+        @staticmethod
+        def generate_content(**kwargs):
             attempts["count"] += 1
             if attempts["count"] == 1:
                 raise RuntimeError("503 UNAVAILABLE")
-            return FakeResponse()
+            return type("Response", (), {"candidates": [FakeCandidate()]})()
 
     class FakeClient:
         models = FakeModels()
@@ -805,12 +876,19 @@ def test_analyze_images_retries_on_transient_failure(monkeypatch):
 
 
 def test_analyze_images_parses_markdown_json(monkeypatch):
-    class FakeResponse:
+    class FakePart:
         text = '```json\n{"summary": "ok", "events": ["event1"]}\n```'
 
+    class FakeContent:
+        parts = [FakePart()]
+
+    class FakeCandidate:
+        content = FakeContent()
+
     class FakeModels:
-        def generate_content(self, **kwargs):
-            return FakeResponse()
+        @staticmethod
+        def generate_content(**kwargs):
+            return type("Response", (), {"candidates": [FakeCandidate()]})()
 
     class FakeClient:
         models = FakeModels()
