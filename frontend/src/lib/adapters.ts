@@ -21,7 +21,8 @@ import { photoUrls, listPhotos } from "./photos";
 export const ANONYMOUS_CONTRIBUTOR: Contributor = {
   id: "me",
   name: "あなた",
-  avatar: "",
+  avatar:
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'><circle cx='20' cy='20' r='20' fill='%23CBD5E1'/><circle cx='20' cy='16' r='7' fill='%23ffffff'/><path d='M6 40c0-8 6-12 14-12s14 4 14 12z' fill='%23ffffff'/></svg>",
 };
 
 /** 位置が取れなかった写真に入る座標。地図に出す前に必ず除外すること */
