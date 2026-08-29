@@ -455,44 +455,16 @@ React.FC<DiaryDetailScreenProps> = ({
     );
 
 
-  const displayedEntries =
-    filteredEntries.filter(
-      (entry, index, entries) => {
-
-        const normalize = (
-          value?: string
-        ) =>
-          (value ?? '')
-            .trim()
-            .toLowerCase();
-
-
-        const entryKey =
-          `${normalize(entry.time)}|${normalize(entry.location)}`;
-
-
-        const firstIndex =
-          entries.findIndex(
-            (candidate) => {
-
-              const candidateKey =
-                `${normalize(candidate.time)}|${normalize(candidate.location)}`;
-
-
-              return (
-                candidateKey ===
-                entryKey
-              );
-            }
-          );
-
-
-        return (
-          firstIndex ===
-          index
-        );
-      }
-    );
+  /*
+   * 日記に表示するエントリ。
+   *
+   * 以前は「時刻 + 場所」が同じエントリを重複として削除していました。
+   * しかし EXIF が無い写真では同じ時刻・同じ場所になることがあり、
+   * 2枚アップロードしても2枚目が日記から消える原因になっていました。
+   *
+   * 写真は ID ごとに別の記録なので、ここでは削除せずすべて表示します。
+   */
+  const displayedEntries = filteredEntries;
 
 
 
