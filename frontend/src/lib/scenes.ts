@@ -124,3 +124,23 @@ export async function updateScenePlace(sceneId: string, place: string): Promise<
     throw new Error(`場所名の変更に失敗しました: ${error.message}`);
   }
 }
+
+/**
+ * コマの日記文を手で直す。
+ *
+ * 生成された文章がおかしいときに書き換えます。
+ * これを呼ばずに画面の中だけで書き換えると、次に読み直したときに
+ * 生成された文章に戻ってしまいます。
+ * sql/004_scene_place.sql を実行していないと権限で弾かれます。
+ */
+export async function updateSceneSummary(sceneId: string, summary: string): Promise<void> {
+  const { error } = await supabase
+    .from("scenes")
+    .update({ summary })
+    .eq("id", sceneId);
+
+  if (error) {
+    console.error("[updateSceneSummary] 日記文の保存に失敗しました", error);
+    throw new Error(`日記文の保存に失敗しました: ${error.message}`);
+  }
+}

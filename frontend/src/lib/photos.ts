@@ -158,7 +158,7 @@ export async function listPhotos(tripId: string): Promise<PhotoRow[]> {
  */
 export async function photoUrl(
   storagePath: string,
-  expiresInSeconds = 60 * 60,
+  expiresInSeconds = 60 * 60 * 12,
 ): Promise<string> {
   const { data, error } = await supabase.storage
     .from(PHOTO_BUCKET)
@@ -175,7 +175,7 @@ export async function photoUrl(
  */
 export async function photoUrls(
   storagePaths: string[],
-  expiresInSeconds = 60 * 60,
+  expiresInSeconds = 60 * 60 * 12,
 ): Promise<Record<string, string>> {
   if (storagePaths.length === 0) return {};
 

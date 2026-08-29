@@ -7,7 +7,10 @@ import {
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
 import { renameTrip } from '../lib/trips';
-import { updateScenePlace } from '../lib/scenes';
+import { updateScenePlace, updateSceneSummary } from '../lib/scenes';
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface DiaryDetailScreenProps {
  trip: Trip;
@@ -105,7 +108,12 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  });
 
  const handleShare = () => {
- navigator.clipboard?.writeText(window.location.href);
+   // window.location.href は画面を切り替えても変わらないので、
+   // そのままコピーするとトップページのURLが渡ってしまいます。
+   const url = UUID_RE.test(trip.id)
+     ? `${window.location.origin}${window.location.pathname}?trip=${trip.id}`
+     : window.location.href;
+   navigator.clipboard?.writeText(url);
  setCopiedLink(true);
  setTimeout(() => setCopiedLink(false), 2000);
  };
@@ -115,14 +123,29 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  setEditingText(entry.aiDiaryText);
  };
 
- const handleSaveEdit = (entryId: string) => {
- setTrip((prev) => ({
- ...prev,
- entries: prev.entries.map((e) => 
- e.id === entryId ? { ...e, aiDiaryText: editingText } : e
- ),
- }));
- setEditingEntryId(null);
+ const handleSaveEdit = async (entryId: string) => {
+   const entry = trip.entries.find((e) => e.id === entryId);
+   const text = editingText;
+
+   // 画面だけ書き換えても、次に読み直したときに生成された文章に戻ります。
+   // DBに保存してはじめて直したことになります。
+   if (entry?.sceneId) {
+     try {
+       await updateSceneSummary(entry.sceneId, text);
+     } catch (e) {
+       setPlaceError(String(e));
+       return;
+     }
+   }
+
+   setTrip((prev) => ({
+     ...prev,
+     entries: prev.entries.map((e) =>
+       e.id === entryId ? { ...e, aiDiaryText: text } : e
+     ),
+   }));
+   setEditingEntryId(null);
+   setPlaceError(null);
  };
 
  const getHighlightIcon = (type: TripHighlight['type']) => {
@@ -138,17 +161,18 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  }
  };
 
+ /* 統計が無いときに架空の数字を出すと、読んだ人が本当だと思ってしまいます */
  const summary = trip.summaryStats || {
- visitedPlacesCount: trip.spots.length || 6,
- travelDuration: '約9時間15分 (10:05〜19:20)',
- totalPhotosCount: trip.photosCount || 42,
- membersCount: trip.members.length || 3,
- topPhotoSpot: '清水寺',
- topPhotoSpotCount: 14,
- bestShotUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
- bestShotTitle: '清水の舞台から見渡した京都の青空',
- bestShotDescription: '青空と緑の山並みがどこまでも広がり、3人で見上げたこの日の象徴的な一枚です。',
- bestShotPhotographer: '田中さん',
+   visitedPlacesCount: trip.spots.length,
+   travelDuration: '',
+   totalPhotosCount: trip.photosCount ?? 0,
+   membersCount: trip.members.length,
+   topPhotoSpot: '',
+   topPhotoSpotCount: 0,
+   bestShotUrl: '',
+   bestShotTitle: '',
+   bestShotDescription: '',
+   bestShotPhotographer: '',
  };
 
  /* 表示用のまとめ。数字は summaryStats、名前は trip の中身から作ります */
@@ -547,7 +571,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  </button>
  <button
  type="button"
- onClick={() => handleSaveEdit(entry.id)}
+ onClick={() => void handleSaveEdit(entry.id)}
  className="px-4 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors flex items-center gap-1"
  >
  <Check className="w-3.5 h-3.5" />
@@ -720,7 +744,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  {member.role || 'メンバー'}
  </span>
  <p className="text-xs text-slate-500 mt-1">
- 提供写真: {trip.entries.filter((e) => e.contributor.id === member.id).length || 14}枚
+ 提供写真: {trip.entries.filter((e) => e.contributor.id === member.id).length}枚
  </p>
  </div>
  </div>

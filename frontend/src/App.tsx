@@ -188,6 +188,7 @@ export default function App() {
       })
       .catch((e) => {
         console.error('[loadMyTrips]', e);
+        setLoadError(`旅の記録を読み込めませんでした: ${String(e)}`);
       });
   }, []);
 
