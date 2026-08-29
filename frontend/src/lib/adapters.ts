@@ -802,9 +802,12 @@ export async function toDiaryEntries(
         : "";
 
 
-    if (
-      generatedUrl
-    ) {
+    /*
+     * 生成がまだ終わっていなくてもコマ自体は出します。
+     * ここで消すと、生成の途中で空白コマが画面から丸ごと消えてしまい、
+     * 何が起きているのか分からなくなります。
+     */
+    {
 
       const location =
         placeOf(
