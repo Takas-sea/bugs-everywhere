@@ -97,13 +97,8 @@ export interface Trip {
   summaryStats?: TripSummaryStats;
 }
 
-export type ActiveScreen = 
-  | 'home'
-  | 'create-trip'
-  | 'upload'
-  | 'generating'
-  | 'diary'
-  | 'map'
-  | 'profile';
+export type ActiveScreen =
+  | 'home' | 'create_trip' | 'upload' | 'generating'
+  | 'diary' | 'memories' | 'map' | 'profile';
 
 export type DiaryTab = 'photos' | 'diary' | 'members' | 'map';
