@@ -209,6 +209,112 @@ def _prune_generated_gap_files_for_trip(trip_id: str) -> None:
         pass
 
 
+def _get_panel_rows_by_status(status: str = "pending") -> list[dict]:
+    if supabase is None:
+        return []
+    try:
+        rows = supabase.table("panels").select("*").eq("status", status).execute()
+        return getattr(rows, "data", []) or []
+    except Exception:
+        return []
+
+
+def _panel_scene_summary(scene_id: str | None, panel_mode: str) -> str:
+    if not scene_id or supabase is None:
+        return "旅の記憶をまとめた一コマです。"
+
+    try:
+        scene_rows = supabase.table("scenes").select("*").eq("id", scene_id).execute()
+        scenes = getattr(scene_rows, "data", []) or []
+        scene = scenes[0] if scenes else {}
+        if panel_mode == "i2i":
+            summary, _ = _describe_scene_from_photo_ids(scene)
+            if summary:
+                return summary
+        else:
+            before_scene = None
+            after_scene = None
+            try:
+                seq = scene.get("seq")
+                if seq is not None:
+                    prev_rows = supabase.table("scenes").select("*").eq("trip_id", scene.get("trip_id")).execute()
+                    scenes_all = getattr(prev_rows, "data", []) or []
+                    before_scene = next((row for row in scenes_all if row.get("seq") == seq - 1), None)
+                    after_scene = next((row for row in scenes_all if row.get("seq") == seq + 1), None)
+            except Exception:
+                pass
+            gap_summary, _ = _describe_gap_from_images(before_scene, after_scene)
+            if gap_summary:
+                return gap_summary
+        return scene.get("summary") or "旅の記憶をまとめた一コマです。"
+    except Exception:
+        return "旅の記憶をまとめた一コマです。"
+
+
+def process_pending_panels(trip_id: str | None = None) -> list[dict]:
+    if supabase is None:
+        return []
+
+    pending_rows = _get_panel_rows_by_status("pending")
+    if trip_id is not None:
+        pending_rows = [
+            row for row in pending_rows
+            if "trip_id" not in row or str(row.get("trip_id")) == str(trip_id)
+        ]
+
+    processed = []
+    for panel in pending_rows:
+        panel_id = panel.get("id")
+        scene_id = panel.get("scene_id")
+        mode = (panel.get("mode") or "gen").lower()
+
+        if not panel_id:
+            continue
+
+        supabase.table("panels").update({"status": "running"}).eq("id", panel_id).execute()
+
+        if mode == "i2i":
+            summary = _panel_scene_summary(scene_id, "i2i")
+            supabase.table("scenes").update({"summary": summary}).eq("id", scene_id).execute()
+            supabase.table("panels").update({"image_path": None, "status": "done"}).eq("id", panel_id).execute()
+            processed.append({"panel_id": panel_id, "scene_id": scene_id, "mode": "i2i", "status": "done", "summary": summary, "image_path": None})
+            continue
+
+        scene_row = {}
+        try:
+            scene_rows = supabase.table("scenes").select("*").eq("id", scene_id).execute()
+            scene_row = (getattr(scene_rows, "data", []) or [{}])[0]
+        except Exception:
+            scene_row = {}
+        before_scene = None
+        after_scene = None
+        seq = scene_row.get("seq")
+        if seq is not None:
+            try:
+                trip_rows = supabase.table("scenes").select("*").eq("trip_id", scene_row.get("trip_id")).execute()
+                all_rows = getattr(trip_rows, "data", []) or []
+                before_scene = next((row for row in all_rows if row.get("seq") == seq - 1), None)
+                after_scene = next((row for row in all_rows if row.get("seq") == seq + 1), None)
+            except Exception:
+                pass
+
+        prompt_summary, prompt_events = _describe_gap_from_images(before_scene, after_scene)
+        final_summary = prompt_summary or (scene_row.get("summary") or "旅の記憶をまとめた一コマです。")
+
+        generated_path = f"generated/{panel_id}.png"
+        try:
+            illustration = generate_diary_illustration(final_summary, events=prompt_events or [])
+            supabase.storage.from_("photos").upload(generated_path, illustration, file_options={"content-type": "image/png", "upsert": "true"})
+        except Exception:
+            generated_path = None
+
+        supabase.table("scenes").update({"summary": final_summary}).eq("id", scene_id).execute()
+        supabase.table("panels").update({"image_path": generated_path, "status": "done"}).eq("id", panel_id).execute()
+        processed.append({"panel_id": panel_id, "scene_id": scene_id, "mode": "gen", "status": "done", "summary": final_summary, "image_path": generated_path})
+
+    return processed
+
+
 def fill_gap_scenes_for_trip(trip_id: str) -> list[dict]:
     if not trip_id or supabase is None:
         return []
@@ -237,8 +343,9 @@ def fill_gap_scenes_for_trip(trip_id: str) -> list[dict]:
             try:
                 panel_rows = supabase.table("panels").select("*").eq("scene_id", scene_id).execute()
                 panel_data = getattr(panel_rows, "data", []) or []
-                panel = next((candidate for candidate in panel_data if candidate.get("scene_id") == scene_id), {})
-                panel_mode = (panel or {}).get("mode") or "gen"
+                if panel_data:
+                    panel = panel_data[0]
+                    panel_mode = (panel or {}).get("mode") or "gen"
             except Exception:
                 panel_mode = "gen"
 
@@ -255,16 +362,12 @@ def fill_gap_scenes_for_trip(trip_id: str) -> list[dict]:
             gap_summary_from_images, gap_events = _describe_gap_from_images(prev, nxt)
             summary = gap_summary_from_images or "前後の旅の情景を自然につなぐ一枚のイメージ。"
 
-            if before_context or after_context:
-                prompt_summary = (
-                    "空白の時間を埋める1枚の旅行イラストです。 "
-                    f"前の写真の要約: {before_context or '不明'}。 "
-                    f"次の写真の要約: {after_context or '不明'}。 "
-                    f"AIが判断した前後の連続感: {gap_summary_from_images}。 "
-                    "前後の写真の流れを自然につなぎ、同じ旅の記憶として一枚の景色にしてください。"
-                )
-            else:
-                prompt_summary = "空白の時間を埋める1枚の旅行イラストです。 前後の写真がなくても、旅の余韻を感じる自然な風景として描いてください。"
+            prompt_summary = (
+                f"{summary} "
+                f"前の写真の要約: {before_context or '前の場面の雰囲気'}。 "
+                f"次の写真の要約: {after_context or '次の場面の雰囲気'}。 "
+                "この一枚は旅のつながりを自然に描くためのイメージです。"
+            )
 
             events = gap_events or [before_context or "前の時間の雰囲気", after_context or "次の時間の雰囲気"]
             storage_path = f"{trip_id}/generated_gap_{scene_id}.png"
@@ -314,6 +417,7 @@ def generate_daily_diary(owner_token: str, date: str) -> dict:
         if not storage_path:
             continue
         photo_bytes = get_image(storage_path)
+        description = row.get("summary") or summary or "旅行の一コマです。"
         timeline.append({
             "type": "photo",
             "storage_path": storage_path,
@@ -321,6 +425,7 @@ def generate_daily_diary(owner_token: str, date: str) -> dict:
             "image_base64": base64.b64encode(photo_bytes).decode("utf-8"),
             "image_mime_type": "image/jpeg",
             "is_gap": bool(row.get("is_gap")),
+            "description": description,
         })
 
     timeline.append({
@@ -329,6 +434,7 @@ def generate_daily_diary(owner_token: str, date: str) -> dict:
         "events": events,
         "image_base64": illustration_base64,
         "image_mime_type": "image/png",
+        "description": summary or "生成された旅行イラストです。",
     })
 
     return {
