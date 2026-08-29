@@ -281,30 +281,45 @@ def _draw_placeholder_illustration(summary: str) -> bytes:
     return buffer.getvalue()
 
 
-def analyze_images(images: list[bytes], image_names: list[str] | None = None) -> dict:
+NEWLINE = "\n"
+
+
+def analyze_images(
+    images: list[bytes],
+    image_names: list[str] | None = None,
+    context: str | None = None,
+) -> dict:
     if not images:
         raise ValueError("At least one image is required for analysis.")
     if client is None:
         raise ValueError("Gemini API key is missing or invalid. Set a valid GEMINI_API_KEY.")
 
-    prompt = types.Part.from_text(
-        text="""
-        以下の複数の写真は、同じ1日の出来事を撮影したものです。
+    hint = f"{NEWLINE}参考情報（写真から読み取れない補足です）:{NEWLINE}{context}" if context else ""
 
-        写真をまとめて分析し、その日の出来事を要約してください。
+    prompt = types.Part.from_text(
+        text=f"""
+        これは旅の絵日記の一コマです。以下の写真は同じ場面で撮られたものです。
+
+        写っているものをよく見て、その場面の日記の文章を書いてください。
+
+        書き方の指示:
+        ・2〜3文。実際に日記に書くような、具体的で情景が浮かぶ文章にしてください。
+        ・写真に写っているもの（建物、food、空の色、人の様子など）に必ず触れてください。
+        ・「大切な瞬間」「かけがえのない時間」のような、どの写真にも当てはまる
+        　抽象的な表現は使わないでください。
+        ・写真から判断できないことは書かないでください。
+        {hint}
 
         以下のJSON形式だけで回答してください。
 
-        {
-          "summary": "1日の出来事を1〜3文で要約",
+        {{
+          "summary": "この場面の日記の文章（2〜3文）",
           "events": [
-            "出来事1",
-            "出来事2",
-            "出来事3"
+            "写真から読み取れた具体的な要素1",
+            "要素2",
+            "要素3"
           ]
-        }
-
-        写真から明確に判断できないことは推測しないでください。
+        }}
         """
     )
 

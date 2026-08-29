@@ -92,21 +92,43 @@ def _describe_scene_from_photo_ids(scene: dict) -> tuple[str, list[str]]:
 
     image_bytes: list[bytes] = []
     image_names: list[str] = []
+    place_names: list[str] = []
     for photo_id in photo_ids:
         try:
-            rows = supabase.table("photos").select("storage_path").eq("id", photo_id).execute()
+            rows = (
+                supabase.table("photos")
+                .select("storage_path, location_name")
+                .eq("id", photo_id)
+                .execute()
+            )
             for item in getattr(rows, "data", []) or []:
                 storage_path = item.get("storage_path")
                 if storage_path:
                     image_bytes.append(get_image(storage_path))
                     image_names.append(storage_path)
-        except Exception:
+                place = item.get("location_name")
+                if place and place not in place_names:
+                    place_names.append(place)
+        except Exception as exc:
+            # 黙って落とすと「写真を見ていない文章」になるので、理由は出す
+            print("写真の取得に失敗しました:", photo_id, repr(exc))
             continue
 
     if not image_bytes:
+        print("写真を1枚も読めませんでした。scene:", scene.get("id"))
         return (scene.get("summary") or "旅の記憶をまとめた一コマです。", [])
 
-    description = analyze_images(image_bytes, image_names=image_names)
+    # 場所と時刻はDBにあるので、写真だけでなくこれも渡す。
+    # 「京都市・立売西町の朝」と分かるだけで、文章がぐっと具体的になる。
+    context_lines = []
+    if place_names:
+        context_lines.append("場所: " + "、".join(place_names))
+    started_at = scene.get("started_at")
+    if started_at:
+        context_lines.append("時刻: " + str(started_at)[11:16])
+    context = "\n".join(context_lines) or None
+
+    description = analyze_images(image_bytes, image_names=image_names, context=context)
     summary = description.get("summary") or (scene.get("summary") or "旅の記憶をまとめた一コマです。")
     events = description.get("events") or []
     return summary, events
