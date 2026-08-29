@@ -26,7 +26,10 @@ const OVERPASS = "https://overpass-api.de/api/interpreter";
 
 const MIN_INTERVAL_MS = 1100; // 利用規約：1秒に1回まで
 const CACHE_PRECISION = 3; // 小数3桁 ≒ 110m。同じスポットは1回で済ませる
-const LANDMARK_RADIUS_M = 120; // 点で登録された施設は、ほぼ目の前にいるときだけ採用する
+// 施設の探し方は2段階。「行き先になる場所」は少し広く、
+// 「たまたま近くにあるだけの店」はごく近くだけを見る。
+const LANDMARK_RADIUS_M = 150; // 観光地・史跡・寺社・公園・駅
+const SHOP_RADIUS_M = 60;      // 飲食店・商店。GPSのずれで隣の店を拾わない距離
 
 export type Place = {
   /** 具体的な場所。「東大寺」「大豆山町」など。取れなければ null */
@@ -72,8 +75,16 @@ type OverpassElement = {
 };
 
 /**
- * 近くにある名前付きの観光地・史跡・公園・神社仏閣を探して、
- * 一番近いものの名前を返す。
+ * 近くにある名前付きの場所を探して、一番近いものの名前を返す。
+ *
+ * 2段階に分けています。
+ *   強い候補（観光地・史跡・寺社・公園・駅）… 150m まで
+ *   弱い候補（飲食店・商店）                 … 60m まで
+ *
+ * 旅行の写真は食事や買い物の場面も多いので、店の名前が出せると
+ * 日記がぐっと具体的になります。ただ店は密集しているので、
+ * GPSが少しずれただけで隣の店を拾います。だから距離を厳しくして、
+ * 強い候補があればそちらを優先します。
  */
 /**
  * その座標を「含んでいる」エリアの名前を返す。
@@ -84,13 +95,14 @@ type OverpassElement = {
  */
 async function findContainingArea(lat: number, lng: number): Promise<string | null> {
   const query = [
-    "[out:json][timeout:15];",
+    "[out:json][timeout:20];",
     `is_in(${lat},${lng})->.a;`,
     "(",
     '  area.a["name"]["tourism"];',
     '  area.a["name"]["historic"];',
     '  area.a["name"]["leisure"="park"];',
     '  area.a["name"]["amenity"="place_of_worship"];',
+    '  area.a["name"]["shop"="mall"];',
     ");",
     "out tags;",
   ].join("\n");
@@ -122,16 +134,21 @@ function rankOf(el: OverpassElement): number {
 }
 
 async function findLandmark(lat: number, lng: number): Promise<string | null> {
-  const around = `${LANDMARK_RADIUS_M},${lat},${lng}`;
+  const strong = `${LANDMARK_RADIUS_M},${lat},${lng}`;
+  const weak = `${SHOP_RADIUS_M},${lat},${lng}`;
+
   const query = [
-    "[out:json][timeout:15];",
+    "[out:json][timeout:20];",
     "(",
-    `  nwr(around:${around})["name"]["tourism"];`,
-    `  nwr(around:${around})["name"]["historic"];`,
-    `  nwr(around:${around})["name"]["leisure"="park"];`,
-    `  nwr(around:${around})["name"]["amenity"="place_of_worship"];`,
+    `  nwr(around:${strong})["name"]["tourism"];`,
+    `  nwr(around:${strong})["name"]["historic"];`,
+    `  nwr(around:${strong})["name"]["leisure"="park"];`,
+    `  nwr(around:${strong})["name"]["amenity"="place_of_worship"];`,
+    `  nwr(around:${strong})["name"]["railway"="station"];`,
+    `  nwr(around:${weak})["name"]["shop"];`,
+    `  nwr(around:${weak})["name"]["amenity"~"^(restaurant|cafe|fast_food|bar|pub|ice_cream)$"];`,
     ");",
-    "out center 30;",
+    "out center 60;",
   ].join("\n");
 
   const res = await fetch(OVERPASS, {
@@ -145,7 +162,7 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
   const elements = json.elements ?? [];
 
   let best: string | null = null;
-  let bestDist = Infinity;
+  let bestScore = Infinity;
 
   for (const el of elements) {
     const name = el.tags?.["name:ja"] ?? el.tags?.name;
@@ -155,13 +172,29 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
     if (eLat === undefined || eLng === undefined) continue;
 
     const d = distanceMeters(lat, lng, eLat, eLng);
-    if (d < bestDist) {
-      bestDist = d;
+    const weakOne = isWeak(el);
+    if (weakOne && d > SHOP_RADIUS_M) continue;
+    if (d > LANDMARK_RADIUS_M) continue;
+
+    // 弱い候補は、同じ距離なら強い候補に負けるようにする
+    const score = weakOne ? d + LANDMARK_RADIUS_M : d;
+    if (score < bestScore) {
+      bestScore = score;
       best = name;
     }
   }
   return best;
 }
+
+/** 飲食店や商店など、「たまたま近くにあるだけ」かもしれない候補か */
+function isWeak(el: OverpassElement): boolean {
+  const t = el.tags ?? {};
+  if (t.shop) return true;
+  return ["restaurant", "cafe", "fast_food", "bar", "pub", "ice_cream"].includes(
+    t.amenity ?? "",
+  );
+}
+
 
 // ---------------------------------------------------------------- 2. 住所
 

@@ -167,9 +167,26 @@ function placeOf(scene: SceneRow, photos: PhotoRow[]): string | null {
   // 手で直した名前があれば、それが正しい
   if (scene.place) return scene.place;
 
+  // 1コマに複数の写真があるときは、多数決で決めます。
+  // 最初の1枚だけを見ると、その1枚のGPSがずれていたときに
+  // コマ全体が違う場所になってしまうためです。
   const ids = new Set(scene.photo_ids);
-  for (const p of photos) if (ids.has(p.id) && p.location_name) return p.location_name;
-  return null;
+  const counts = new Map<string, number>();
+
+  for (const p of photos) {
+    if (!ids.has(p.id) || !p.location_name) continue;
+    counts.set(p.location_name, (counts.get(p.location_name) ?? 0) + 1);
+  }
+
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const [name, n] of counts) {
+    if (n > bestCount) {
+      best = name;
+      bestCount = n;
+    }
+  }
+  return best;
 }
 
 /**
