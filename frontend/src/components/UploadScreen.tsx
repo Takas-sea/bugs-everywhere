@@ -1,17 +1,23 @@
-import React, { useState, useRef } from 'react';
-import { 
-  Upload, Sparkles, Clock, MapPin, Trash2, UserPlus, 
-  ArrowRight, ArrowLeft, Image as ImageIcon, Camera, Plus, Check, Info
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Upload, Sparkles, Clock, MapPin, UserPlus,
+  ArrowRight, ArrowLeft, Image as ImageIcon, Camera, AlertTriangle, Loader2,
 } from 'lucide-react';
-import { PhotoItem, Contributor, Trip } from '../types';
-import { SAMPLE_MEMBERS, SAMPLE_UPLOAD_PHOTOS } from '../data/mockTrips';
+import { PhotoItem, Trip } from '../types';
+import { createTrip, uploadPhotos } from '../lib/photos';
+import { prepareScenes } from '../lib/scenes';
+import { loadPhotoItems } from '../lib/adapters';
 
 interface UploadScreenProps {
   currentTrip: Trip;
-  onGenerateDiary: (photos: PhotoItem[]) => void;
+  /** 実際の trip_id を渡します。App 側はこれを使って loadTrip してください */
+  onGenerateDiary: (tripId: string) => void;
   onBack: () => void;
   onOpenInviteModal: () => void;
 }
+
+/** モックの旅行IDと本物のUUIDを見分ける */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const UploadScreen: React.FC<UploadScreenProps> = ({
   currentTrip,
@@ -19,83 +25,87 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
   onBack,
   onOpenInviteModal,
 }) => {
-  // Photos uploaded for this trip
-  const [photos, setPhotos] = useState<PhotoItem[]>(SAMPLE_UPLOAD_PHOTOS);
-  const [currentUploader, setCurrentUploader] = useState<Contributor>(currentTrip.members[0] || SAMPLE_MEMBERS[0]);
+  const [tripId, setTripId] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [selectedPhotoForPreview, setSelectedPhotoForPreview] = useState<PhotoItem | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [errors, setErrors] = useState<string[]>([]);
+  const [noExifCount, setNoExifCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // New photo custom mock inputs
-  const [customLocation, setCustomLocation] = useState('祇園 辻利');
-  const [customTime, setCustomTime] = useState('14:30');
+  // Supabase 上の旅行を用意する。
+  // CreateTripScreen がまだモックのIDを作っている場合は、ここで本物を作ります。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (UUID_RE.test(currentTrip.id)) {
+          if (!cancelled) setTripId(currentTrip.id);
+          return;
+        }
+        const trip = await createTrip(currentTrip.title);
+        if (!cancelled) setTripId(trip.id);
+      } catch (e) {
+        if (!cancelled) setErrors([`旅行の作成に失敗しました: ${String(e)}`]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentTrip.id, currentTrip.title]);
 
-  // Handle mock file selection
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files);
-      const newItems: PhotoItem[] = files.map((file, idx) => {
-        const url = URL.createObjectURL(file as Blob);
-        const randomHour = 10 + Math.floor(Math.random() * 8);
-        const randomMin = 10 + Math.floor(Math.random() * 45);
-        const timeStr = `${String(randomHour).padStart(2, '0')}:${String(randomMin).padStart(2, '0')}`;
+  const refresh = useCallback(async (id: string) => {
+    const items = await loadPhotoItems(id);
+    setPhotos(items);
+    setNoExifCount(items.filter((p) => p.timestamp === 0).length);
+  }, []);
 
-        return {
-          id: `custom-photo-${Date.now()}-${idx}`,
-          url,
-          time: timeStr,
-          timestamp: Date.now() + idx * 1000,
-          locationName: customLocation || `${currentTrip.destination} スポット`,
-          coordinates: { lat: 35.0, lng: 135.76 },
-          contributor: currentUploader,
-          caption: `${currentUploader.name}が撮影した写真`,
-          isSelected: true,
-        };
+  // 旅行が決まったら、すでに入っている写真を読み込む（追加アップロード時に効きます）
+  useEffect(() => {
+    if (tripId) refresh(tripId).catch(() => undefined);
+  }, [tripId, refresh]);
+
+  /** ここが本体。EXIF読み取り・Storage保存・DB登録は uploadPhotos の中で終わります */
+  const handleFiles = async (files: File[]) => {
+    if (!tripId || files.length === 0) return;
+    setBusy(true);
+    setErrors([]);
+    setProgress(`0 / ${files.length} 枚`);
+
+    try {
+      const { failed } = await uploadPhotos(files, tripId, (done, total) => {
+        setProgress(`${done} / ${total} 枚`);
       });
-
-      setPhotos((prev) => [...prev, ...newItems]);
+      if (failed.length) {
+        setErrors(failed.map((f) => `${f.file}: ${f.reason}`));
+      }
+      await refresh(tripId);
+    } catch (e) {
+      setErrors([String(e)]);
+    } finally {
+      setBusy(false);
+      setProgress('');
     }
   };
 
-  const handleSimulateAddSamplePhotos = (member: Contributor) => {
-    const samplePhotoPool = [
-      {
-        url: 'https://images.unsplash.com/photo-1545569341-9eb8b30979d9?auto=format&fit=crop&w=1200&q=80',
-        location: '祇園の路地',
-        time: '16:10',
-        caption: '風情ある格子戸の前で撮影',
-      },
-      {
-        url: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?auto=format&fit=crop&w=1200&q=80',
-        location: '清水寺 仁王門',
-        time: '11:15',
-        caption: '門の前の青空がまぶしかった！',
-      },
-    ];
-
-    const randomPick = samplePhotoPool[Math.floor(Math.random() * samplePhotoPool.length)];
-    const newItem: PhotoItem = {
-      id: `sim-photo-${Date.now()}`,
-      url: randomPick.url,
-      time: randomPick.time,
-      timestamp: Date.now(),
-      locationName: randomPick.location,
-      coordinates: { lat: 34.995, lng: 135.78 },
-      contributor: member,
-      caption: randomPick.caption,
-      isSelected: true,
-    };
-
-    setPhotos((prev) => [...prev, newItem]);
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void handleFiles(Array.from(e.target.files ?? []));
+    e.target.value = '';
   };
 
-  const handleRemovePhoto = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPhotos((prev) => prev.filter((p) => p.id !== id));
+  /** 写真を時系列に並べてコマ割りを作り、生成へ進む */
+  const handleGenerate = async () => {
+    if (!tripId) return;
+    setBusy(true);
+    try {
+      await prepareScenes(tripId);
+      onGenerateDiary(tripId);
+    } catch (e) {
+      setErrors([`コマ割りの作成に失敗しました: ${String(e)}`]);
+      setBusy(false);
+    }
   };
 
-  // Sort photos chronologically
-  const sortedPhotos = [...photos].sort((a, b) => a.time.localeCompare(b.time));
+  const sortedPhotos = [...photos].sort((a, b) => a.timestamp - b.timestamp);
 
   return (
     <div className="pb-28 md:pb-16 max-w-5xl mx-auto px-4 sm:px-6 pt-4 md:pt-6">
@@ -108,15 +118,12 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>戻る</span>
         </button>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 font-diary hidden sm:inline">
-            写真 {photos.length} 枚アップロード済み
-          </span>
-        </div>
+        <span className="text-xs text-slate-500 font-diary hidden sm:inline">
+          写真 {photos.length} 枚アップロード済み
+        </span>
       </div>
 
-      {/* 3. 旅行メンバー機能エリア */}
+      {/* 旅行メンバー */}
       <section className="bg-white rounded-3xl p-5 sm:p-6 border border-sky-100 shadow-md shadow-sky-100/50 mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -128,107 +135,47 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
               {currentTrip.title}
             </h2>
             <p className="text-xs text-slate-500 font-diary mt-0.5">
-              参加者全員が写真をアップロードできます。AIが全員の写真を撮影時間順に整理します。
+              撮影時刻と位置情報をもとに、AIが一日を時系列に整理します。
             </p>
           </div>
-
-          {/* Members Avatars & Invite Button */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {currentTrip.members.map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-50 border border-slate-200/80 text-xs text-slate-700 shadow-2xs"
-              >
-                <img
-                  src={member.avatar}
-                  alt={member.name}
-                  className="w-5 h-5 rounded-full object-cover ring-1 ring-white"
-                />
-                <span className="font-bold">{member.name}</span>
-                <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md font-medium">
-                  {photos.filter((p) => p.contributor.id === member.id).length}枚
-                </span>
-              </div>
-            ))}
-
-            {/* Invite Button */}
-            <button
-              onClick={onOpenInviteModal}
-              id="upload-invite-member-btn"
-              className="px-3.5 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center gap-1.5 transition-colors border border-blue-200 cursor-pointer shadow-2xs"
-            >
-              <UserPlus className="w-3.5 h-3.5" />
-              <span>メンバーを招待</span>
-            </button>
-          </div>
+          <button
+            onClick={onOpenInviteModal}
+            id="upload-invite-member-btn"
+            className="px-3.5 py-1.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold flex items-center gap-1.5 transition-colors border border-blue-200 cursor-pointer shadow-2xs self-start"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>メンバーを招待</span>
+          </button>
         </div>
       </section>
 
-      {/* 4. みんなで写真を追加 (Upload Area) */}
+      {/* アップロード */}
       <section className="bg-white rounded-3xl p-6 sm:p-8 border border-sky-100 shadow-md shadow-sky-100/50 mb-8">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h3 className="text-lg font-bold font-title text-slate-800 flex items-center gap-2">
-              <Camera className="w-5 h-5 text-blue-600" />
-              <span>写真をアップロード</span>
-            </h3>
-            <p className="text-xs text-slate-500 font-diary mt-0.5">
-              スマートフォンやデジカメで撮影した写真を選択してください（複数枚一括可能）
-            </p>
-          </div>
-
-          {/* Current Uploader Switcher (for realistic group upload simulation) */}
-          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-            <span className="text-xs font-bold text-slate-600 pl-2">撮影者:</span>
-            {currentTrip.members.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => setCurrentUploader(m)}
-                className={`px-3 py-1 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                  currentUploader.id === m.id
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-600 hover:bg-slate-200/70'
-                }`}
-              >
-                <img src={m.avatar} alt={m.name} className="w-4 h-4 rounded-full object-cover" />
-                <span>{m.name.split(' ')[0]}</span>
-              </button>
-            ))}
-          </div>
+        <div className="mb-6">
+          <h3 className="text-lg font-bold font-title text-slate-800 flex items-center gap-2">
+            <Camera className="w-5 h-5 text-blue-600" />
+            <span>写真をアップロード</span>
+          </h3>
+          <p className="text-xs text-slate-500 font-diary mt-0.5">
+            スマートフォンやデジカメで撮影した写真を選択してください（複数枚一括可能）
+          </p>
         </div>
 
-        {/* Big Drag & Drop Box */}
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={(e) => {
             e.preventDefault();
             setIsDragOver(false);
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-              const files = Array.from(e.dataTransfer.files);
-              const newItems: PhotoItem[] = files.map((file, idx) => ({
-                id: `drop-photo-${Date.now()}-${idx}`,
-                url: URL.createObjectURL(file as Blob),
-                time: `1${Math.floor(Math.random() * 8)}:${Math.floor(Math.random() * 59).toString().padStart(2, '0')}`,
-                timestamp: Date.now() + idx,
-                locationName: `${currentTrip.destination} スポット`,
-                coordinates: { lat: 35.0, lng: 135.75 },
-                contributor: currentUploader,
-                caption: `${currentUploader.name}が追加した写真`,
-                isSelected: true,
-              }));
-              setPhotos((prev) => [...prev, ...newItems]);
-            }
+            void handleFiles(Array.from(e.dataTransfer.files ?? []));
           }}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative border-2 border-dashed rounded-3xl p-8 text-center cursor-pointer transition-all duration-200 ${
-            isDragOver
-              ? 'border-blue-500 bg-blue-50/80 ring-4 ring-blue-500/20'
-              : 'border-sky-200 bg-sky-50/40 hover:bg-sky-50/80 hover:border-blue-400'
+          onClick={() => !busy && fileInputRef.current?.click()}
+          className={`relative border-2 border-dashed rounded-3xl p-8 text-center transition-all duration-200 ${
+            busy
+              ? 'border-slate-200 bg-slate-50 cursor-wait'
+              : isDragOver
+                ? 'border-blue-500 bg-blue-50/80 ring-4 ring-blue-500/20 cursor-pointer'
+                : 'border-sky-200 bg-sky-50/40 hover:bg-sky-50/80 hover:border-blue-400 cursor-pointer'
           }`}
         >
           <input
@@ -238,49 +185,50 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
             accept="image/*"
             onChange={handleFileChange}
             className="hidden"
+            disabled={busy}
           />
-
           <div className="w-16 h-16 rounded-full bg-blue-600 text-white flex items-center justify-center mx-auto mb-3 shadow-md shadow-blue-500/30">
-            <Upload className="w-8 h-8 stroke-[2.2]" />
+            {busy
+              ? <Loader2 className="w-8 h-8 stroke-[2.2] animate-spin" />
+              : <Upload className="w-8 h-8 stroke-[2.2]" />}
           </div>
-
           <h4 className="text-base font-bold text-slate-800 mb-1">
-            クリックまたは写真をドラッグ＆ドロップして追加
+            {busy ? `アップロード中… ${progress}` : 'クリックまたは写真をドラッグ＆ドロップして追加'}
           </h4>
           <p className="text-xs text-slate-500 font-diary">
-            JPEG, PNG, HEIC形式に対応 · 位置情報・撮影日時は自動解析されます
+            JPEG / PNG 推奨 · 撮影日時と位置情報は自動で読み取ります
           </p>
-
-          <div className="mt-4 flex items-center justify-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-xs font-bold text-blue-700 border border-blue-200 shadow-2xs">
-              <img src={currentUploader.avatar} alt="" className="w-3.5 h-3.5 rounded-full object-cover" />
-              <span>「{currentUploader.name}」として追加中</span>
-            </span>
-          </div>
         </div>
 
-        {/* Quick Simulation helper buttons */}
-        <div className="mt-4 flex items-center justify-between flex-wrap gap-2 text-xs">
-          <span className="text-slate-500 font-diary">
-            💡 他のメンバーからの写真追加をテスト:
-          </span>
-          <div className="flex items-center gap-2">
-            {currentTrip.members.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => handleSimulateAddSamplePhotos(m)}
-                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>{m.name.split(' ')[0]}の写真を追加</span>
-              </button>
-            ))}
+        {/* 失敗した写真 */}
+        {errors.length > 0 && (
+          <div className="mt-4 rounded-2xl bg-rose-50 border border-rose-200 p-4">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-rose-700 mb-1.5">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{errors.length}件のエラー</span>
+            </div>
+            <ul className="text-[11px] text-rose-600 font-diary space-y-0.5">
+              {errors.slice(0, 5).map((msg, i) => <li key={i}>{msg}</li>)}
+            </ul>
           </div>
-        </div>
+        )}
+
+        {/* EXIFが取れなかった写真の注意 */}
+        {noExifCount > 0 && (
+          <div className="mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-800 mb-1">
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>{noExifCount}枚に撮影日時がありません</span>
+            </div>
+            <p className="text-[11px] text-amber-700 font-diary">
+              スクリーンショットや、SNS経由で受け取った写真は撮影情報が消えていることがあります。
+              その写真はアップロード順で並びます。
+            </p>
+          </div>
+        )}
       </section>
 
-      {/* Uploaded Photos Grid (With Photographer, Time, Location attribution) */}
+      {/* アップロード済みの写真 */}
       <section className="mb-10">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
@@ -289,9 +237,7 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
               アップロードされた写真 ({sortedPhotos.length}枚)
             </h3>
           </div>
-          <span className="text-xs text-slate-500 font-diary">
-            AIが撮影時間順に自動整列
-          </span>
+          <span className="text-xs text-slate-500 font-diary">撮影時間順に自動整列</span>
         </div>
 
         {sortedPhotos.length === 0 ? (
@@ -309,51 +255,32 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
                 key={photo.id}
                 className="group relative rounded-3xl bg-white border border-sky-100 shadow-md shadow-sky-100/50 hover:shadow-xl hover:border-blue-300 transition-all overflow-hidden flex flex-col justify-between"
               >
-                {/* Photo Image */}
                 <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
-                  <img
-                    src={photo.url}
-                    alt={photo.locationName}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-
-                  {/* Top Badges: Time & Delete */}
+                  {photo.url ? (
+                    <img
+                      src={photo.url}
+                      alt={photo.locationName}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    // 署名URLがまだ発行できない状態（Storageのポリシー待ち）
+                    <div className="w-full h-full flex items-center justify-center text-slate-300">
+                      <ImageIcon className="w-10 h-10" />
+                    </div>
+                  )}
                   <div className="absolute top-2 left-2 flex items-center gap-1 bg-black/65 backdrop-blur-xs text-white text-[11px] font-mono px-2.5 py-0.5 rounded-full">
                     <Clock className="w-3 h-3 text-sky-300" />
                     <span>{photo.time}</span>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={(e) => handleRemovePhoto(photo.id, e)}
-                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/50 hover:bg-rose-600 text-white transition-colors cursor-pointer"
-                    title="写真を削除"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* Contributor Attribution Overlay Tag (撮影者) */}
-                  <div className="absolute bottom-2 right-2 flex items-center gap-1.5 bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-full text-xs font-bold text-slate-800 shadow-sm">
-                    <img
-                      src={photo.contributor.avatar}
-                      alt={photo.contributor.name}
-                      className="w-4 h-4 rounded-full object-cover ring-1 ring-blue-400"
-                    />
-                    <span className="text-[11px]">撮影: {photo.contributor.name}</span>
-                  </div>
                 </div>
 
-                {/* Photo metadata footer (Location & Caption) */}
                 <div className="p-3.5 bg-gradient-to-b from-white to-sky-50/30">
-                  <div className="flex items-center gap-1 text-xs font-bold text-slate-800 mb-1">
+                  <div className="flex items-center gap-1 text-xs font-bold text-slate-800">
                     <MapPin className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                    <span className="truncate">{photo.locationName}</span>
+                    <span className="truncate">
+                      {photo.locationName || '場所の情報なし'}
+                    </span>
                   </div>
-                  {photo.caption && (
-                    <p className="text-[11px] text-slate-500 font-diary line-clamp-1">
-                      {photo.caption}
-                    </p>
-                  )}
                 </div>
               </div>
             ))}
@@ -361,24 +288,23 @@ export const UploadScreen: React.FC<UploadScreenProps> = ({
         )}
       </section>
 
-      {/* 5. 写真日記を作るCTA (Big Sticky Floating Bottom Action) */}
+      {/* 生成へ進む */}
       <div className="sticky bottom-4 z-20 bg-white/95 backdrop-blur-md rounded-3xl p-5 sm:p-6 border border-sky-200 shadow-xl shadow-blue-500/15 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-bold text-blue-700 mb-1">
-            <Sparkles className="w-4 h-4 text-blue-600 animate-spin" />
+            <Sparkles className="w-4 h-4 text-blue-600" />
             <span>AI JOURNAL GENERATOR</span>
           </div>
           <h4 className="text-base sm:text-lg font-bold font-title text-slate-900">
             {photos.length}枚の写真からAI写真日記を生成します
           </h4>
           <p className="text-xs text-slate-500 font-diary">
-            撮影時間・場所・みんなの写真をもとに、時系列の美しい思い出日記を作成します
+            撮影時間と場所をもとに一日をコマに分け、写真が残っていない時間も絵で補います
           </p>
         </div>
-
         <button
-          onClick={() => onGenerateDiary(sortedPhotos)}
-          disabled={photos.length === 0}
+          onClick={handleGenerate}
+          disabled={photos.length === 0 || busy || !tripId}
           id="generate-photo-diary-btn"
           className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-blue-600 via-sky-600 to-sky-500 hover:from-blue-700 hover:to-sky-600 text-white font-bold text-sm sm:text-base shadow-lg shadow-blue-500/30 hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
         >

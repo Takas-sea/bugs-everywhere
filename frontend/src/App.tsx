@@ -1,12 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 
-import {
-  ActiveScreen,
-  Trip,
-  PhotoItem,
-  DiaryEntry,
-  MapSpot,
-} from './types';
+import { ActiveScreen, Trip } from './types';
 
 import {
   ALL_PAST_TRIPS,
@@ -14,16 +8,21 @@ import {
   SAMPLE_MEMBERS,
 } from './data/mockTrips';
 
+import { loadTrip, loadMyTrips } from './lib/adapters';
+
 import { HomeScreen } from './components/HomeScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { UploadScreen } from './components/UploadScreen';
 import { GeneratingScreen } from './components/GeneratingScreen';
 import { DiaryDetailScreen } from './components/DiaryDetailScreen';
 import { MemoriesListScreen } from './components/MemoriesListScreen';
-import { OverallMapScreen } from './components/OverallMapScreen';
 import { ProfileScreen } from './components/ProfileScreen';
 import { InviteModal } from './components/InviteModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
+
+/** Supabase 上の本物の旅行かどうか（モックのIDと区別する） */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function App() {
   const [activeScreen, setActiveScreen] =
@@ -41,10 +40,15 @@ export default function App() {
   const [currentTripDraft, setCurrentTripDraft] =
     useState<Trip | null>(null);
 
-  const [
-    uploadedPhotosForTrip,
-    setUploadedPhotosForTrip,
-  ] = useState<PhotoItem[]>([]);
+  /**
+   * Supabase 上の本物の trip_id。
+   * UploadScreen が写真を上げてコマ割りまで済ませたときに渡してきます。
+   */
+  const [realTripId, setRealTripId] =
+    useState<string | null>(null);
+
+  const [loadError, setLoadError] =
+    useState<string | null>(null);
 
   const [lightboxData, setLightboxData] = useState<{
     url: string;
@@ -69,26 +73,19 @@ export default function App() {
   const savedEmail =
     localStorage.getItem('tabi-memory-email') || '';
 
-  const [isLoggedIn, setIsLoggedIn] =
-    useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const [userEmail, setUserEmail] =
-    useState(savedEmail);
+  const [userEmail, setUserEmail] = useState(savedEmail);
 
   const handleLogin = (email: string) => {
-    localStorage.setItem(
-      'tabi-memory-email',
-      email
-    );
+    localStorage.setItem('tabi-memory-email', email);
 
     setUserEmail(email);
     setIsLoggedIn(true);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem(
-      'tabi-memory-email'
-    );
+    localStorage.removeItem('tabi-memory-email');
 
     setUserEmail('');
     setIsLoggedIn(false);
@@ -106,36 +103,23 @@ export default function App() {
   useEffect(() => {
     if (!window.history.state?.screen) {
       window.history.replaceState(
-        {
-          screen: 'home',
-        },
+        { screen: 'home' },
         '',
         window.location.href
       );
     }
 
-    const handlePopState = (
-      event: PopStateEvent
-    ) => {
-      const screen =
-        event.state?.screen as
-          | ActiveScreen
-          | undefined;
+    const handlePopState = (event: PopStateEvent) => {
+      const screen = event.state?.screen as
+        | ActiveScreen
+        | undefined;
 
-      setActiveScreen(
-        screen || 'home'
-      );
+      setActiveScreen(screen || 'home');
 
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    window.addEventListener(
-      'popstate',
-      handlePopState
-    );
+    window.addEventListener('popstate', handlePopState);
 
     return () => {
       window.removeEventListener(
@@ -146,66 +130,54 @@ export default function App() {
   }, []);
 
   // =========================
+  // この端末で作った旅行を読み込む
+  // =========================
+
+  useEffect(() => {
+    loadMyTrips()
+      .then((trips) => {
+        if (trips.length === 0) return;
+
+        setPastTrips((prev) => [
+          ...trips,
+          ...prev.filter(
+            (t) => !trips.some((x) => x.id === t.id)
+          ),
+        ]);
+      })
+      .catch((e) => {
+        console.error('[loadMyTrips]', e);
+      });
+  }, []);
+
+  // =========================
   // Screen Change
   // =========================
 
-  const changeScreen = (
-    screen: ActiveScreen
-  ) => {
+  const changeScreen = (screen: ActiveScreen) => {
     setActiveScreen(screen);
 
     window.history.pushState(
-      {
-        screen,
-      },
+      { screen },
       '',
       window.location.href
     );
 
-    window.scrollTo({
-      top: 0,
-      behavior: 'smooth',
-    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   // =========================
   // 新しい旅の思い出を作る
-  // =========================
-  //
-  // 以前:
-  // home → create_trip
-  //
-  // 修正後:
   // home → upload
-  //
+  // =========================
 
   const handleStartCreateTrip = () => {
-    // 新しく写真をアップロードする場合は
-    // 戻るボタンでホームへ戻る
     setUploadBackScreen('home');
 
-    // 古いアップロード写真をリセット
-    setUploadedPhotosForTrip([]);
-
-    // 新しい旅として扱うため
-    // 以前の編集中データをリセット
+    // 新しい旅として扱うため、以前の編集中データをリセット
     setCurrentTripDraft(null);
-
-    // 写真アップロード画面へ直接移動
-    changeScreen('upload');
-  };
-
-  // =========================
-  // Create Trip
-  // =========================
-
-  const handleCreatedTrip = (
-    newTrip: Trip
-  ) => {
-    setCurrentTripDraft(newTrip);
-    setSelectedTrip(newTrip);
-
-    setUploadBackScreen('home');
+    setRealTripId(null);
+    setLoadError(null);
 
     changeScreen('upload');
   };
@@ -214,309 +186,96 @@ export default function App() {
   // Upload → Generating
   // =========================
 
-  const handleStartGenerating = (
-    photos: PhotoItem[]
-  ) => {
-    setUploadedPhotosForTrip(
-      photos
-    );
+  /**
+   * UploadScreen で写真を上げて、scenes / panels まで作り終えた状態で
+   * 呼ばれます。渡ってくるのは Supabase 上の本物の trip_id です。
+   */
+  const handleStartGenerating = (tripId: string) => {
+    setRealTripId(tripId);
+    setLoadError(null);
 
     changeScreen('generating');
   };
 
   // =========================
-  // AI Generation Complete
+  // 生成完了 → 日記を組み立てる
   // =========================
 
-  const handleFinishGenerating = () => {
-    const tripToFinalize =
-      currentTripDraft ||
-      selectedTrip;
-
-    if (
-      uploadedPhotosForTrip &&
-      uploadedPhotosForTrip.length > 0
-    ) {
-      const sorted = [
-        ...uploadedPhotosForTrip,
-      ].sort((a, b) =>
-        a.time.localeCompare(b.time)
-      );
-
-      // =========================
-      // Diary Entries
-      // =========================
-
-      const generatedEntries: DiaryEntry[] =
-        sorted.map(
-          (
-            photo,
-            index
-          ) => {
-            const spotName =
-              photo.locationName ||
-              `${tripToFinalize.destination} スポット ${
-                index + 1
-              }`;
-
-            const uploaderName =
-              photo.contributor.name;
-
-            const aiTextSnippets = [
-              `${uploaderName}が撮影した一枚。${spotName}に到着して、みんなで旅の始まりに胸を躍らせました。`,
-
-              `${spotName}での思い出。${uploaderName}がカメラを構えて素敵なアングルで記録。その場の楽しそうな声が聞こえてくるようです。`,
-
-              `ひと休みに立ち寄った${spotName}。美味しいものを味わいながら、今日巡った場所の感想で盛り上がりました。`,
-
-              `${spotName}にて。美しい景色をバックにみんなでたくさん写真を撮り合いました。`,
-
-              `夕暮れの${spotName}。一日の終わりを締めくくる忘れられない時間になりました。`,
-            ];
-
-            const aiDiaryText =
-              aiTextSnippets[
-                index %
-                  aiTextSnippets.length
-              ] +
-              (photo.caption
-                ? `（メモ: ${photo.caption}）`
-                : '');
-
-            return {
-              id: `entry-gen-${Date.now()}-${index}`,
-
-              photoId:
-                photo.id,
-
-              time:
-                photo.time,
-
-              location:
-                spotName,
-
-              title:
-                `${spotName}でのひとコマ`,
-
-              aiDiaryText,
-
-              photoUrl:
-                photo.url,
-
-              contributor:
-                photo.contributor,
-
-              weather:
-                '晴れ ☀️',
-
-              feeling:
-                'ワクワク',
-
-              cameraInfo:
-                'スマートフォン撮影',
-
-              qaPrompt:
-                `${spotName}で特に印象に残ったことは何ですか？`,
-
-              userAnswer:
-                undefined,
-
-              isAnswered:
-                false,
-            };
-          }
-        );
-
-      // =========================
-      // Locations
-      // =========================
-
-      const uniqueLocations =
-        Array.from(
-          new Set(
-            sorted.map(
-              (p) =>
-                p.locationName ||
-                tripToFinalize.destination
-            )
-          )
-        );
-
-      // =========================
-      // Map Spots
-      // =========================
-
-      const generatedSpots: MapSpot[] =
-        uniqueLocations.map(
-          (
-            loc,
-            idx
-          ) => {
-            const matchedPhoto =
-              sorted.find(
-                (p) =>
-                  p.locationName === loc
-              ) ||
-              sorted[0];
-
-            return {
-              id:
-                `spot-gen-${idx + 1}`,
-
-              stepNumber:
-                idx + 1,
-
-              name:
-                loc,
-
-              time:
-                matchedPhoto?.time ||
-                '12:00',
-
-              lat:
-                35.003 +
-                idx * 0.008 -
-                0.02,
-
-              lng:
-                135.77 +
-                idx * 0.006 -
-                0.015,
-
-              photoUrl:
-                matchedPhoto?.url ||
-                tripToFinalize.coverImage,
-
-              diarySnippet:
-                `${loc}をみんなで散策`,
-
-              contributorName:
-                matchedPhoto
-                  ?.contributor
-                  .name ||
-                'メンバー',
-            };
-          }
-        );
-
-      // =========================
-      // Final Trip
-      // =========================
-
-      const finalizedTrip: Trip = {
-        ...tripToFinalize,
-
-        coverImage:
-          sorted[0]?.url ||
-          tripToFinalize.coverImage,
-
-        photosCount:
-          sorted.length,
-
-        spotsCount:
-          generatedSpots.length,
-
-        spots:
-          generatedSpots,
-
-        entries:
-          generatedEntries,
-
-        summaryStats: {
-          visitedPlacesCount:
-            generatedSpots.length,
-
-          travelDuration:
-            `${
-              sorted[0]?.time ||
-              '10:00'
-            } 〜 ${
-              sorted[
-                sorted.length - 1
-              ]?.time ||
-              '18:00'
-            }`,
-
-          totalPhotosCount:
-            sorted.length,
-
-          membersCount:
-            tripToFinalize
-              .members
-              .length,
-
-          topPhotoSpot:
-            generatedSpots[0]
-              ?.name ||
-            tripToFinalize
-              .destination,
-
-          topPhotoSpotCount:
-            sorted.length,
-
-          bestShotUrl:
-            sorted[0]?.url ||
-            tripToFinalize
-              .coverImage,
-
-          bestShotTitle:
-            `${tripToFinalize.title}のベストショット`,
-
-          bestShotDescription:
-            '参加者みんなの写真から選ばれた、思い出の象徴的な一枚です。',
-
-          bestShotPhotographer:
-            sorted[0]
-              ?.contributor
-              .name ||
-            'メンバー',
-        },
-      };
-
-      // =========================
-      // Save Trip
-      // =========================
-
-      setPastTrips(
-        (prev) => [
-          finalizedTrip,
-
-          ...prev.filter(
-            (t) =>
-              t.id !==
-              finalizedTrip.id
-          ),
-        ]
-      );
-
-      setSelectedTrip(
-        finalizedTrip
-      );
-
-      setCurrentTripDraft(
-        null
-      );
-    } else {
-      setSelectedTrip(
-        tripToFinalize
-      );
+  /**
+   * 文章も絵も座標もすべて Supabase から来るので、
+   * ここで作るものはありません。読んで並べるだけです。
+   */
+  const handleFinishGenerating = async () => {
+    if (!realTripId) {
+      changeScreen('diary');
+      return;
     }
 
-    // 完成した写真日記へ
-    changeScreen('diary');
+    try {
+      const trip = await loadTrip(realTripId);
+
+      setPastTrips((prev) => [
+        trip,
+        ...prev.filter((t) => t.id !== trip.id),
+      ]);
+
+      setSelectedTrip(trip);
+      setCurrentTripDraft(null);
+      changeScreen('diary');
+    } catch (e) {
+      console.error('[loadTrip]', e);
+      setLoadError(String(e));
+      changeScreen('diary');
+    }
   };
 
   // =========================
   // Select Trip
   // =========================
 
-  const handleSelectTrip = (
-    trip: Trip
-  ) => {
+  /**
+   * 日記を開くたびにDBから読み直します。
+   * 生成は画面を開いたあとに終わることがあるので、
+   * これが無いと文章や絵ができても画面が古いままになります。
+   */
+  const handleSelectTrip = async (trip: Trip) => {
     setSelectedTrip(trip);
-
     changeScreen('diary');
+
+    if (!UUID_RE.test(trip.id)) return;
+
+    setRealTripId(trip.id);
+
+    try {
+      setSelectedTrip(await loadTrip(trip.id));
+    } catch (e) {
+      console.error('[loadTrip]', e);
+      setLoadError(String(e));
+    }
   };
+
+  /** いま開いている日記を読み直す（生成の進み具合を反映するため） */
+  const refreshCurrentTrip = useCallback(async () => {
+    if (!selectedTrip || !UUID_RE.test(selectedTrip.id)) {
+      return;
+    }
+
+    try {
+      const fresh = await loadTrip(selectedTrip.id);
+
+      setSelectedTrip(fresh);
+
+      setPastTrips((prev) => [
+        fresh,
+        ...prev.filter((t) => t.id !== fresh.id),
+      ]);
+
+      setLoadError(null);
+    } catch (e) {
+      console.error('[loadTrip]', e);
+      setLoadError(String(e));
+    }
+  }, [selectedTrip]);
 
   // =========================
   // Lightbox
@@ -527,11 +286,7 @@ export default function App() {
     caption?: string,
     spotName?: string
   ) => {
-    setLightboxData({
-      url,
-      caption,
-      spotName,
-    });
+    setLightboxData({ url, caption, spotName });
   };
 
   // =========================
@@ -539,11 +294,7 @@ export default function App() {
   // =========================
 
   if (!isLoggedIn) {
-    return (
-      <LoginScreen
-        onLogin={handleLogin}
-      />
-    );
+    return <LoginScreen onLogin={handleLogin} />;
   }
 
   // =========================
@@ -551,267 +302,106 @@ export default function App() {
   // =========================
 
   return (
-    <div
-      className="
-        min-h-screen
-        bg-[#F8FAFC]
-        text-slate-800
-        flex
-        flex-col
-        font-diary
-      "
-    >
-      {/* =====================
-          Main Content
-      ===================== */}
+    <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-diary">
+      <main className="flex-1 w-full transition-all duration-200">
+        {loadError && (
+          <div className="mx-4 mt-4 rounded-2xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-700">
+            日記の読み込みに失敗しました: {loadError}
+          </div>
+        )}
 
-      <main
-        className="
-          flex-1
-          w-full
-          transition-all
-          duration-200
-        "
-      >
-        {/* =====================
-            Home
-        ===================== */}
+        {/* ===================== Home ===================== */}
 
-        {activeScreen ===
-          'home' && (
+        {activeScreen === 'home' && (
           <HomeScreen
-            pastTrips={
-              pastTrips
-            }
-            onSelectTrip={
-              handleSelectTrip
-            }
-
-            /*
-             * ここを押すと
-             * UploadScreenへ移動
-             */
-            onNewTripClick={
-              handleStartCreateTrip
-            }
-
-            onViewAllMemories={() =>
-              changeScreen(
-                'memories'
-              )
-            }
-
-            onProfileClick={() =>
-              changeScreen(
-                'profile'
-              )
-            }
-
-            userName={
-              userName
-            }
-
-            onLogout={
-              handleLogout
-            }
+            pastTrips={pastTrips}
+            onSelectTrip={handleSelectTrip}
+            onNewTripClick={handleStartCreateTrip}
+            onViewAllMemories={() => changeScreen('memories')}
+            onProfileClick={() => changeScreen('profile')}
+            userName={userName}
+            onLogout={handleLogout}
           />
         )}
 
-        {/* =====================
-            Upload
-        ===================== */}
+        {/* ===================== Upload ===================== */}
 
-        {activeScreen ===
-          'upload' && (
+        {activeScreen === 'upload' && (
           <UploadScreen
-            currentTrip={
-              currentTripDraft ||
-              selectedTrip
-            }
-
-            onGenerateDiary={
-              handleStartGenerating
-            }
-
-            /*
-             * 新規作成ならhome
-             * 日記から追加ならdiary
-             */
-            onBack={() =>
-              changeScreen(
-                uploadBackScreen
-              )
-            }
-
+            currentTrip={currentTripDraft || selectedTrip}
+            onGenerateDiary={handleStartGenerating}
+            onBack={() => changeScreen(uploadBackScreen)}
             onOpenInviteModal={() =>
-              setIsInviteModalOpen(
-                true
-              )
+              setIsInviteModalOpen(true)
             }
           />
         )}
 
-        {/* =====================
-            Generating
-        ===================== */}
+        {/* ===================== Generating ===================== */}
 
-        {activeScreen ===
-          'generating' && (
+        {activeScreen === 'generating' && (
           <GeneratingScreen
-            onComplete={
-              handleFinishGenerating
-            }
+            tripId={realTripId}
+            onComplete={handleFinishGenerating}
           />
         )}
 
-        {/* =====================
-            Diary
-        ===================== */}
+        {/* ===================== Diary ===================== */}
 
-        {activeScreen ===
-          'diary' && (
-          <DiaryDetailScreen
-            trip={
-              selectedTrip
-            }
+        {activeScreen === 'diary' && (
+          <>
+            <div className="px-4 pt-4">
+              <button
+                onClick={refreshCurrentTrip}
+                className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
+              >
+                最新の状態に更新
+              </button>
+            </div>
 
-            onBack={() =>
-              changeScreen(
-                'home'
-              )
-            }
-
-            onOpenInviteModal={() =>
-              setIsInviteModalOpen(
-                true
-              )
-            }
-
-            onSelectPhotoLightbox={
-              handleOpenLightbox
-            }
-
-            /*
-             * 既存の日記に
-             * 写真を追加
-             */
-            onUploadMorePhotos={() => {
-              setCurrentTripDraft(
-                selectedTrip
-              );
-
-              setUploadBackScreen(
-                'diary'
-              );
-
-              setUploadedPhotosForTrip(
-                []
-              );
-
-              changeScreen(
-                'upload'
-              );
-            }}
-          />
+            <DiaryDetailScreen
+              trip={selectedTrip}
+              onBack={() => changeScreen('home')}
+              onOpenInviteModal={() =>
+                setIsInviteModalOpen(true)
+              }
+              onSelectPhotoLightbox={handleOpenLightbox}
+              onUploadMorePhotos={() => {
+                setCurrentTripDraft(selectedTrip);
+                setUploadBackScreen('diary');
+                changeScreen('upload');
+              }}
+            />
+          </>
         )}
 
-        {/* =====================
-            Memories
-        ===================== */}
+        {/* ===================== Memories ===================== */}
 
-        {activeScreen ===
-          'memories' && (
+        {activeScreen === 'memories' && (
           <MemoriesListScreen
-            trips={
-              pastTrips
-            }
-
-            onSelectTrip={
-              handleSelectTrip
-            }
-
-            onNewTripClick={
-              handleStartCreateTrip
-            }
+            trips={pastTrips}
+            onSelectTrip={handleSelectTrip}
+            onNewTripClick={handleStartCreateTrip}
           />
         )}
 
-        {/* =====================
-            Map
-        ===================== */}
+        {/* ===================== Profile ===================== */}
 
-        {activeScreen ===
-          'map' && (
-          <OverallMapScreen
-            trips={
-              pastTrips
-            }
-
-            onSelectTrip={
-              handleSelectTrip
-            }
-          />
-        )}
-
-        {/* =====================
-            Profile
-        ===================== */}
-
-        {activeScreen ===
-          'profile' && (
-          <ProfileScreen />
-        )}
+        {activeScreen === 'profile' && <ProfileScreen />}
       </main>
 
-      {/* =====================
-          Invite Modal
-      ===================== */}
-
       <InviteModal
-        isOpen={
-          isInviteModalOpen
-        }
-
-        onClose={() =>
-          setIsInviteModalOpen(
-            false
-          )
-        }
-
-        tripTitle={
-          selectedTrip?.title ||
-          '京都1日旅行'
-        }
-
-        members={
-          selectedTrip?.members ||
-          SAMPLE_MEMBERS
-        }
+        isOpen={isInviteModalOpen}
+        onClose={() => setIsInviteModalOpen(false)}
+        tripTitle={selectedTrip?.title || '旅の記録'}
+        members={selectedTrip?.members || SAMPLE_MEMBERS}
       />
 
-      {/* =====================
-          Photo Lightbox
-      ===================== */}
-
       <PhotoLightbox
-        photoUrl={
-          lightboxData?.url ||
-          null
-        }
-
-        caption={
-          lightboxData?.caption
-        }
-
-        spotName={
-          lightboxData?.spotName
-        }
-
-        onClose={() =>
-          setLightboxData(
-            null
-          )
-        }
+        photoUrl={lightboxData?.url || null}
+        caption={lightboxData?.caption}
+        spotName={lightboxData?.spotName}
+        onClose={() => setLightboxData(null)}
       />
     </div>
   );

@@ -237,6 +237,7 @@ export const MOCK_KYOTO_TRIP: Trip = {
   entries: [
     {
       id: 'entry-1',
+      photoId: 'photo-1',
    
       time: '10:05',
       title: '京都駅に到着！今日はいよいよ3人で京都旅行',
