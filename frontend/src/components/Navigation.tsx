@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, BookOpen, Plus, MapPin, User, Compass, Sparkles, Camera } from 'lucide-react';
+import { Home, BookOpen, Plus, Sparkles, Camera } from 'lucide-react';
 import { ActiveScreen } from '../types';
 
 interface NavigationProps {
@@ -18,7 +18,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       {/* Desktop Sidebar (Left side, fixed) */}
       <aside className="hidden md:flex flex-col w-64 fixed left-0 top-0 bottom-0 bg-white/95 backdrop-blur-md border-r border-sky-100/80 z-40 p-5 shadow-[4px_0_24px_rgba(2,132,199,0.03)]">
         {/* Brand Logo & Name */}
-        <div 
+        <div
           onClick={() => setActiveScreen('home')}
           className="cursor-pointer flex items-center gap-3 px-2 py-3 mb-6 group"
         >
@@ -75,34 +75,6 @@ export const Navigation: React.FC<NavigationProps> = ({
             <BookOpen className={`w-5 h-5 ${activeScreen === 'diary' ? 'text-blue-600' : 'text-slate-400'}`} />
             <span>写真日記</span>
           </button>
-
-          {/* 3. 旅マップ */}
-          <button
-            onClick={() => setActiveScreen('map')}
-            id="nav-desktop-map"
-            className={`w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer ${
-              activeScreen === 'map'
-                ? 'bg-blue-50 text-blue-700 font-bold shadow-xs'
-                : 'text-slate-600 hover:bg-sky-50/50 hover:text-slate-900'
-            }`}
-          >
-            <MapPin className={`w-5 h-5 ${activeScreen === 'map' ? 'text-blue-600' : 'text-slate-400'}`} />
-            <span>旅マップ</span>
-          </button>
-
-          {/* 4. プロフィール */}
-          <button
-            onClick={() => setActiveScreen('profile')}
-            id="nav-desktop-profile"
-            className={`w-full flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-sm font-medium transition-all duration-150 cursor-pointer ${
-              activeScreen === 'profile'
-                ? 'bg-blue-50 text-blue-700 font-bold shadow-xs'
-                : 'text-slate-600 hover:bg-sky-50/50 hover:text-slate-900'
-            }`}
-          >
-            <User className={`w-5 h-5 ${activeScreen === 'profile' ? 'text-blue-600' : 'text-slate-400'}`} />
-            <span>プロフィール</span>
-          </button>
         </nav>
 
         {/* Bottom Journal status info */}
@@ -133,17 +105,6 @@ export const Navigation: React.FC<NavigationProps> = ({
             <span className="text-[10px]">ホーム</span>
           </button>
 
-          <button
-            onClick={() => setActiveScreen('diary')}
-            id="mobile-nav-diary"
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 transition-colors cursor-pointer ${
-              activeScreen === 'diary' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <BookOpen className="w-5 h-5" />
-            <span className="text-[10px]">写真日記</span>
-          </button>
-
           {/* Elevated Center Plus Button */}
           <div className="relative -top-4">
             <button
@@ -157,25 +118,14 @@ export const Navigation: React.FC<NavigationProps> = ({
           </div>
 
           <button
-            onClick={() => setActiveScreen('map')}
-            id="mobile-nav-map"
+            onClick={() => setActiveScreen('diary')}
+            id="mobile-nav-diary"
             className={`flex flex-col items-center gap-0.5 py-1 px-2.5 transition-colors cursor-pointer ${
-              activeScreen === 'map' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'
+              activeScreen === 'diary' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'
             }`}
           >
-            <MapPin className="w-5 h-5" />
-            <span className="text-[10px]">旅マップ</span>
-          </button>
-
-          <button
-            onClick={() => setActiveScreen('profile')}
-            id="mobile-nav-profile"
-            className={`flex flex-col items-center gap-0.5 py-1 px-2.5 transition-colors cursor-pointer ${
-              activeScreen === 'profile' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'
-            }`}
-          >
-            <User className="w-5 h-5" />
-            <span className="text-[10px]">プロフィール</span>
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[10px]">写真日記</span>
           </button>
         </div>
       </nav>
