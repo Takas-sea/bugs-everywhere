@@ -719,6 +719,24 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </button>
           </div>
 
+          {/* まだ1件も無いとき */}
+          {pastTrips.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white/60 p-10 text-center">
+              <p className="text-sm font-bold text-slate-700">
+                まだ旅の記録がありません
+              </p>
+              <p className="mt-1.5 text-xs text-slate-500">
+                写真をアップロードすると、ここに並びます。
+              </p>
+              <button
+                onClick={onNewTripClick}
+                className="mt-5 px-5 py-2.5 rounded-xl bg-[#003B95] text-white text-xs font-bold hover:bg-[#002F75] transition-colors cursor-pointer"
+              >
+                写真をアップロードする
+              </button>
+            </div>
+          )}
+
           {/* Cards */}
           <div
             className="

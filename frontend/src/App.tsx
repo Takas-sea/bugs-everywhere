@@ -2,11 +2,26 @@ import React, { useCallback, useEffect, useState } from 'react';
 
 import { ActiveScreen, Trip } from './types';
 
-import {
-  ALL_PAST_TRIPS,
-  MOCK_KYOTO_TRIP,
-  SAMPLE_MEMBERS,
-} from './data/mockTrips';
+import { SAMPLE_MEMBERS } from './data/mockTrips';
+
+/**
+ * 旅行を1つも作っていないときの入れ物。
+ * サンプルの旅行（京都・大阪など）は本物と紛らわしいので出していません。
+ */
+const EMPTY_TRIP: Trip = {
+  id: 'new',
+  title: '新しい旅の記録',
+  date: '',
+  destination: '',
+  coverImage: '',
+  members: [],
+  spotsCount: 0,
+  photosCount: 0,
+  weather: '',
+  spots: [],
+  entries: [],
+  tags: [],
+};
 
 import { loadTrip, loadMyTrips } from './lib/adapters';
 
@@ -28,10 +43,10 @@ export default function App() {
     useState<ActiveScreen>('home');
 
   const [pastTrips, setPastTrips] =
-    useState<Trip[]>(ALL_PAST_TRIPS);
+    useState<Trip[]>([]);
 
   const [selectedTrip, setSelectedTrip] =
-    useState<Trip>(MOCK_KYOTO_TRIP);
+    useState<Trip>(EMPTY_TRIP);
 
   const [isInviteModalOpen, setIsInviteModalOpen] =
     useState(false);
