@@ -428,7 +428,14 @@ React.FC<DiaryDetailScreenProps> = ({
 
   /* メンバーによる絞り込み */
 
-  const displayedEntries =
+  /*
+   * 表示する日記を作る
+   *
+   * 同じ時刻・同じ場所の空エントリが重複して返ってくる場合があるため、
+   * 画面上では1件だけ表示する。
+   * これで「17:15 / 場所を入れる」が重複して大きな空白カードになるのを防ぐ。
+   */
+  const filteredEntries =
     trip.entries.filter(
       (entry) => {
 
@@ -443,6 +450,46 @@ React.FC<DiaryDetailScreenProps> = ({
         return (
           entry.contributor.id ===
           selectedMemberFilter
+        );
+      }
+    );
+
+
+  const displayedEntries =
+    filteredEntries.filter(
+      (entry, index, entries) => {
+
+        const normalize = (
+          value?: string
+        ) =>
+          (value ?? '')
+            .trim()
+            .toLowerCase();
+
+
+        const entryKey =
+          `${normalize(entry.time)}|${normalize(entry.location)}`;
+
+
+        const firstIndex =
+          entries.findIndex(
+            (candidate) => {
+
+              const candidateKey =
+                `${normalize(candidate.time)}|${normalize(candidate.location)}`;
+
+
+              return (
+                candidateKey ===
+                entryKey
+              );
+            }
+          );
+
+
+        return (
+          firstIndex ===
+          index
         );
       }
     );
@@ -1732,7 +1779,8 @@ React.FC<DiaryDetailScreenProps> = ({
 
                                     <p className="text-sm sm:text-base text-slate-700 leading-relaxed whitespace-pre-line">
 
-                                      {entry.aiDiaryText}
+                                      {entry.aiDiaryText?.trim() ||
+                                        'この日の思い出を、写真を見ながら振り返っています。場所や出来事を編集して、旅の記録を完成させましょう。'}
 
                                     </p>
 
