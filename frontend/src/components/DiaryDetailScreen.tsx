@@ -661,11 +661,55 @@ React.FC<DiaryDetailScreenProps> = ({
 
 
 
-  const summary =
-    trip.summaryStats || {
+  /*
+   * 訪れた場所の件数を画面側でも補正する。
+   * summaryStats の visitedPlacesCount が 0 のままでも、
+   * 写真や日記が存在する場合は 0 箇所と表示しない。
+   */
+  const recordedPlaceNames =
+    Array.from(
+      new Set(
+        [
+          ...trip.spots.map(
+            (spot) => spot.name
+          ),
 
-      visitedPlacesCount:
-        trip.spots.length,
+          ...displayedEntries.map(
+            (entry) => entry.location
+          ),
+
+          ...galleryPhotos.map(
+            (photo) => photo.locationName
+          ),
+        ]
+          .map(
+            (name) =>
+              (name ?? '').trim()
+          )
+          .filter(
+            (name) =>
+              name.length > 0 &&
+              name !== '場所を入れる' &&
+              name !== '場所の記録なし'
+          )
+      )
+    );
+
+
+  const calculatedVisitedPlacesCount =
+    trip.spots.length > 0
+      ? trip.spots.length
+      : recordedPlaceNames.length > 0
+      ? recordedPlaceNames.length
+      : galleryPhotos.length > 0
+      ? galleryPhotos.length
+      : displayedEntries.length;
+
+
+  const summary = {
+    ...(trip.summaryStats || {
+
+      visitedPlacesCount: 0,
 
       travelDuration: '',
 
@@ -687,21 +731,32 @@ React.FC<DiaryDetailScreenProps> = ({
 
       bestShotPhotographer: '',
 
-    };
+    }),
+
+    visitedPlacesCount:
+      calculatedVisitedPlacesCount,
+
+    totalPhotosCount:
+      trip.photosCount ??
+      galleryPhotos.length,
+
+    membersCount:
+      trip.members.length,
+
+  };
 
 
 
   const spotRange =
-
-    trip.spots.length === 0
-
-      ? '記録なし'
-
-      : trip.spots.length === 1
-
-      ? trip.spots[0].name
-
-      : `${trip.spots[0].name}〜${trip.spots[trip.spots.length - 1].name}`;
+    trip.spots.length > 0
+      ? trip.spots.length === 1
+        ? trip.spots[0].name
+        : `${trip.spots[0].name}〜${trip.spots[trip.spots.length - 1].name}`
+      : recordedPlaceNames.length > 0
+      ? recordedPlaceNames.join('・')
+      : calculatedVisitedPlacesCount > 0
+      ? `写真から${calculatedVisitedPlacesCount}か所を記録`
+      : '記録なし';
 
 
 
@@ -1114,8 +1169,7 @@ React.FC<DiaryDetailScreenProps> = ({
 
                   訪れた場所{' '}
 
-                  {trip.spots.length ||
-                    trip.spotsCount}
+                  {calculatedVisitedPlacesCount}
 
                   箇所
 
@@ -2076,18 +2130,22 @@ React.FC<DiaryDetailScreenProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
 
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm min-h-[165px] flex flex-col">
 
-                <div className="text-sm text-slate-600 font-medium mb-3">
+                <div className="text-sm text-slate-600 font-medium">
 
                   訪れた場所
 
                 </div>
 
 
-                <div className="text-3xl font-bold text-red-600">
+                <div className="flex items-baseline mt-5">
 
-                  {summary.visitedPlacesCount}
+                  <span className="text-3xl font-bold text-red-600">
+
+                    {summary.visitedPlacesCount}
+
+                  </span>
 
                   <span className="ml-2 text-sm font-normal text-slate-600">
 
@@ -2098,7 +2156,7 @@ React.FC<DiaryDetailScreenProps> = ({
                 </div>
 
 
-                <div className="text-xs text-slate-400 mt-3 truncate">
+                <div className="text-xs text-slate-400 mt-auto pt-4 truncate">
 
                   {spotRange}
 
@@ -2109,24 +2167,24 @@ React.FC<DiaryDetailScreenProps> = ({
 
 
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm min-h-[165px] flex flex-col">
 
 
-                <div className="text-sm text-slate-600 font-medium mb-3">
+                <div className="text-sm text-slate-600 font-medium">
 
                   旅行時間
 
                 </div>
 
 
-                <div className="text-2xl font-bold text-red-600">
+                <div className="text-2xl font-bold text-red-600 mt-5">
 
                   {durationLabel}
 
                 </div>
 
 
-                <div className="text-xs text-slate-400 mt-3">
+                <div className="text-xs text-slate-400 mt-auto pt-4">
 
                   {timeRange}
 
@@ -2137,19 +2195,23 @@ React.FC<DiaryDetailScreenProps> = ({
 
 
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm min-h-[165px] flex flex-col">
 
 
-                <div className="text-sm text-slate-600 font-medium mb-3">
+                <div className="text-sm text-slate-600 font-medium">
 
                   撮影した写真
 
                 </div>
 
 
-                <div className="text-3xl font-bold text-red-600">
+                <div className="flex items-baseline mt-5">
 
-                  {summary.totalPhotosCount}
+                  <span className="text-3xl font-bold text-red-600">
+
+                    {summary.totalPhotosCount}
+
+                  </span>
 
                   <span className="ml-2 text-sm font-normal text-slate-600">
 
@@ -2160,7 +2222,7 @@ React.FC<DiaryDetailScreenProps> = ({
                 </div>
 
 
-                <div className="text-xs text-slate-400 mt-3">
+                <div className="text-xs text-slate-400 mt-auto pt-4">
 
                   {summary.membersCount}人で集約
 
@@ -2171,19 +2233,23 @@ React.FC<DiaryDetailScreenProps> = ({
 
 
 
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm min-h-[165px] flex flex-col">
 
 
-                <div className="text-sm text-slate-600 font-medium mb-3">
+                <div className="text-sm text-slate-600 font-medium">
 
                   参加メンバー
 
                 </div>
 
 
-                <div className="text-3xl font-bold text-red-600">
+                <div className="flex items-baseline mt-5">
 
-                  {summary.membersCount}
+                  <span className="text-3xl font-bold text-red-600">
+
+                    {summary.membersCount}
+
+                  </span>
 
                   <span className="ml-2 text-sm font-normal text-slate-600">
 
@@ -2194,7 +2260,7 @@ React.FC<DiaryDetailScreenProps> = ({
                 </div>
 
 
-                <div className="text-xs text-slate-400 mt-3 truncate">
+                <div className="text-xs text-slate-400 mt-auto pt-4 truncate">
 
                   {memberNames}
 
