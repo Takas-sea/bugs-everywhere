@@ -86,6 +86,27 @@ def get_daily_photo_paths(owner_token: str, date: str) -> list[str]:
     return [row["storage_path"] for row in rows if row.get("storage_path")]
 
 
+def resolve_trip_ids_by_owner_token(owner_token: str, client=None) -> list[str]:
+    client = client or supabase
+    if not owner_token:
+        return []
+    if client is None:
+        return [owner_token]
+
+    try:
+        table = client.table("trips")
+        if not hasattr(table, "select") or not hasattr(table, "eq"):
+            return [owner_token]
+        rows = table.select("id").eq("owner_token", owner_token).execute()
+        trip_ids = [row.get("id") for row in getattr(rows, "data", []) or [] if row.get("id")]
+        if trip_ids:
+            return trip_ids
+    except Exception:
+        pass
+
+    return [owner_token]
+
+
 def insert_photo_metadata(owner_token: str, metadata: dict, client=None) -> dict:
     client = client or supabase
     if client is None:
@@ -123,13 +144,35 @@ def update_photo_metadata(photo_id: str | None = None, storage_path: str | None 
     if not photo_id and not storage_path:
         raise ValueError("Either photo_id or storage_path is required to update a photo row.")
 
-    query = client.table("photos").update(payload)
-    if photo_id:
-        query = query.eq("id", photo_id)
-    elif storage_path:
-        query = query.eq("storage_path", storage_path)
-    result = query.execute()
-    return getattr(result, "data", [payload])[0]
+    unsupported_fields = {"generated_from_gap"}
+    candidate_payloads = [
+        {k: v for k, v in payload.items() if k not in unsupported_fields},
+        {k: v for k, v in payload.items() if k not in unsupported_fields and k != "storage_path"},
+        payload,
+    ]
+
+    last_error = None
+    for candidate in candidate_payloads:
+        if not candidate:
+            continue
+        query = client.table("photos").update(candidate)
+        if photo_id:
+            query = query.eq("id", photo_id)
+        elif storage_path:
+            query = query.eq("storage_path", storage_path)
+        try:
+            result = query.execute()
+            return getattr(result, "data", [candidate])[0]
+        except Exception as exc:
+            last_error = exc
+            msg = str(exc).lower()
+            if "does not exist" not in msg and "could not find the" not in msg and "column" not in msg:
+                raise
+
+    if last_error is not None:
+        raise last_error
+
+    return payload
 
 
 def get_image(path: str) -> bytes:
