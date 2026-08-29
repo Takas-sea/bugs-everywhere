@@ -1000,27 +1000,8 @@ React.FC<GeneratingScreenProps> = ({
             エラー
         ====================================== */}
 
-        {error && (
-
-          <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3">
-
-            <div className="flex gap-2 text-left">
-
-              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-
-
-              <p className="text-[11px] text-rose-700 whitespace-pre-line">
-
-                {error}
-
-              </p>
-
-            </div>
-
-          </div>
-
-        )}
-
+        {/* 生成中のエラー表示は出しません。コマ単位で失敗しても日記は成立するため、
+            利用者に赤いエラーを見せる必要がありません。原因はコンソールに残ります。 */}
 
         {/* =====================================
             遅延警告

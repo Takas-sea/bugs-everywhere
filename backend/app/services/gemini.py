@@ -107,28 +107,80 @@ def write_gap_text(before_summary: str | None, after_summary: str | None) -> str
     )
 
 
+def write_gap_diary_text(
+    before_summary: str | None,
+    after_summary: str | None,
+    context: str | None = None,
+) -> str:
+    """写真が残っていない時間帯の、日記の文章を書く。
+
+    write_gap_text は名前に反して画像生成用のプロンプトを返します。
+    そちらを scenes.summary に入れると「前の場面: …」がそのまま画面に出るので、
+    表示用の文章はこちらで作ります。
+
+    ここで大事なのは「盛らないこと」です。写真が無い時間なので、何があったかは
+    本当は分かりません。京都市内の2枚のあいだに新幹線での移動を書いてしまうような、
+    もっともらしい作り話をさせないよう、条件を明示しています。
+    """
+    if client is None:
+        raise RuntimeError("GEMINI_API_KEY が設定されていません")
+
+    before = (before_summary or "").strip() or "（前のコマの記録なし）"
+    after = (after_summary or "").strip() or "（次のコマの記録なし）"
+
+    prompt = (
+        "旅の絵日記で、写真が1枚も残っていない時間帯の文章を書いてください。\n\n"
+        f"直前のコマ: {before}\n"
+        f"直後のコマ: {after}\n"
+    )
+    if context:
+        prompt += f"{context}\n"
+
+    prompt += (
+        "\n書き方:\n"
+        "・2文程度。短くて構いません。\n"
+        "・写真が無い時間なので、具体的に何をしたかは分かりません。"
+        "断定せず、ふわっとした書き方にしてください。\n"
+        "・行った場所、食べたもの、乗った乗り物などを勝手に作らないでください。\n"
+        "・前後の場所が近い場合は、長距離の移動（新幹線、飛行機、高速道路など）を"
+        "書かないでください。歩いた、休んだ、次の場所へ向かった、程度にとどめてください。\n"
+        "・「前の場面」「次の場面」のような説明の言葉は使わないでください。\n"
+        "・写真に写っていた固有名詞を、この時間帯の出来事として書かないでください。\n\n"
+        "文章だけを返してください。前置きもJSONも要りません。"
+    )
+
+    response = client.models.generate_content(
+        model=_model_name,
+        contents=[prompt],
+    )
+
+    text = (getattr(response, "text", None) or "").strip()
+    if not text:
+        raise RuntimeError("空白コマの文章が返ってきませんでした")
+    return text
+
+
 def generate_image(summary: str, events: list[str] | None = None) -> bytes:
     return generate_diary_illustration(summary=summary, events=events)
 
 
 def generate_diary_illustration(summary: str, events: list[str] | None = None) -> bytes:
-    """空白の時間の絵を作る。
+    """空白の時間の絵を Gemini に描かせる。
 
-    まず Gemini の画像生成モデルに描かせます。失敗したとき（クォータ切れ、
-    ネットワーク、モデルが使えないなど）は、下の _draw_placeholder_illustration
-    で簡易的な風景を描いて返します。絵が無いとコマが空になってしまうため、
-    ここでは例外を投げずに必ず何かを返します。
+    以前は失敗したときに Pillow で簡易的な風景を描いて返していましたが、
+    それだと「AIが描いた絵」と説明できないものが混ざるうえ、失敗しても
+    気づけませんでした。いまは失敗したら例外を投げます。
     """
     if not summary:
         raise ValueError("A diary summary is required to generate an illustration.")
 
-    if client is not None:
-        try:
-            return _generate_illustration_with_gemini(summary, events)
-        except Exception as exc:
-            print("画像生成エラー（代替の絵を使います）:", repr(exc))
+    if client is None:
+        raise RuntimeError("GEMINI_API_KEY が設定されていません")
 
-    return _draw_placeholder_illustration(summary)
+    print(f"[画像生成] モデル={_image_model_name} 文章={summary[:40]}...")
+    data = _generate_illustration_with_gemini(summary, events)
+    print(f"[画像生成] 成功 {len(data)} バイト")
+    return data
 
 
 def _generate_illustration_with_gemini(
@@ -138,14 +190,22 @@ def _generate_illustration_with_gemini(
     import base64
 
     hints = "、".join([e for e in (events or []) if e])[:200]
+
     prompt = (
-        "旅の絵日記に載せる、やわらかい水彩風のイラストを1枚描いてください。"
-        "写真が残っていない時間帯を想像で補う挿絵です。"
-        "文字は入れないでください。人物の顔は描き込まないでください。"
-        f"場面: {summary}"
+        "旅の記録に使う写真のような画像を1枚作ってください。"
+        "写真が残っていない時間帯を、あとから補うための1枚です。\n\n"
+        f"写すもの:\n{summary}\n\n"
+        "作り方:\n"
+        "・実際にカメラで撮った写真のように、写実的に作ってください。\n"
+        "・イラスト、アニメ調、水彩画風、絵画風にはしないでください。\n"
+        "・上の文章にある場所、乗り物、時間帯、天気を、実際に見える形で写してください。\n"
+        "・抽象的な画像にしないでください。グラデーションだけ、模様だけ、"
+        "色面だけの画像は避けてください。\n"
+        "・人物は写さないでください。風景や建物、乗り物だけにしてください。\n"
+        "・文字やロゴは入れないでください。"
     )
     if hints:
-        prompt += f" 手がかり: {hints}"
+        prompt += f"\n\n参考（写真から読み取れた要素）: {hints}"
 
     interaction = client.interactions.create(
         model=_image_model_name,

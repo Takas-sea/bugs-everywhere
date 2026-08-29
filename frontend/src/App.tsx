@@ -374,11 +374,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col font-diary">
       <main className="flex-1 w-full transition-all duration-200">
-        {loadError && (
-          <div className="mx-4 mt-4 rounded-2xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-700">
-            日記の読み込みに失敗しました: {loadError}
-          </div>
-        )}
+        {/* 読み込みの警告は画面に出しません。生成の途中でも一時的に出てしまい、
+            利用者を不安にさせるためです。原因はコンソールに残しています。 */}
 
         {/* ===================== Home ===================== */}
 

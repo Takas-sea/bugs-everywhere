@@ -1,9 +1,15 @@
 import base64
+import math
+import traceback
 from datetime import datetime
 
 from fastapi import HTTPException
 
-from app.services.gemini import analyze_images, generate_diary_illustration
+from app.services.gemini import (
+    analyze_images,
+    generate_diary_illustration,
+    write_gap_diary_text,
+)
 from app.services.supabase import (
     get_daily_photo_paths,
     get_daily_photo_rows,
@@ -83,6 +89,89 @@ def _describe_gap_from_images(before_row: dict | None, after_row: dict | None) -
     summary = description.get("summary") or "前後の写真を自然につなぐ旅の光景"
     events = description.get("events") or []
     return summary, events
+
+
+def _photos_of_scene(scene: dict | None) -> list[dict]:
+    """そのコマに紐づく写真の行（場所と座標つき）を返す"""
+    if not scene or supabase is None:
+        return []
+    ids = scene.get("photo_ids") or []
+    if not ids:
+        return []
+    try:
+        rows = (
+            supabase.table("photos")
+            .select("location_name, latitude, longitude")
+            .in_("id", ids)
+            .execute()
+        )
+        return getattr(rows, "data", []) or []
+    except Exception:
+        return []
+
+
+def _distance_km(a: dict | None, b: dict | None) -> float | None:
+    """2枚の写真のあいだの距離（km）。座標が無ければ None"""
+    if not a or not b:
+        return None
+    try:
+        lat1, lng1 = float(a["latitude"]), float(a["longitude"])
+        lat2, lng2 = float(b["latitude"]), float(b["longitude"])
+    except (TypeError, KeyError, ValueError):
+        return None
+
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(h))
+
+
+def _gap_context(scene: dict, before_scene: dict | None, after_scene: dict | None) -> str:
+    """空白コマの文章を書かせるときに渡す、事実の補足。
+
+    これが無いと「京都市内の2枚のあいだに新幹線で移動した」のような、
+    もっともらしいが間違った文章が出ます。距離と時間を数字で渡して、
+    ありえない移動を書かせないようにします。
+    """
+    lines: list[str] = []
+
+    before_photos = _photos_of_scene(before_scene)
+    after_photos = _photos_of_scene(after_scene)
+
+    place_before = next((p.get("location_name") for p in before_photos if p.get("location_name")), None)
+    place_after = next((p.get("location_name") for p in after_photos if p.get("location_name")), None)
+    if place_before:
+        lines.append(f"直前にいた場所: {place_before}")
+    if place_after:
+        lines.append(f"直後にいた場所: {place_after}")
+
+    km = _distance_km(
+        before_photos[-1] if before_photos else None,
+        after_photos[0] if after_photos else None,
+    )
+    if km is not None:
+        if km < 1:
+            lines.append("2つの場所の距離: 1km未満（ほぼ同じ場所です）")
+        else:
+            lines.append(f"2つの場所の距離: 約{km:.0f}km")
+
+    started, ended = scene.get("started_at"), scene.get("ended_at")
+    if started and ended:
+        try:
+            t1 = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+            t2 = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
+            minutes = int((t2 - t1).total_seconds() // 60)
+            if minutes > 0:
+                if minutes < 120:
+                    lines.append(f"空白の長さ: 約{minutes}分")
+                else:
+                    lines.append(f"空白の長さ: 約{minutes // 60}時間")
+        except Exception:
+            pass
+
+    return "\n".join(lines)
 
 
 def _describe_scene_from_photo_ids(scene: dict) -> tuple[str, list[str]]:
@@ -294,10 +383,12 @@ def process_pending_panels(trip_id: str | None = None) -> list[dict]:
         if not panel_id:
             continue
 
+        print(f"[ワーカー] 処理開始 seq={panel.get('seq')} mode={mode}")
         supabase.table("panels").update({"status": "running"}).eq("id", panel_id).execute()
 
         if mode == "i2i":
             summary = _panel_scene_summary(scene_id, "i2i")
+            print(f"[ワーカー] 写真コマの文章: {summary[:60]}")
             supabase.table("scenes").update({"summary": summary}).eq("id", scene_id).execute()
             supabase.table("panels").update({"image_path": None, "status": "done"}).eq("id", panel_id).execute()
             processed.append({"panel_id": panel_id, "scene_id": scene_id, "mode": "i2i", "status": "done", "summary": summary, "image_path": None})
@@ -321,14 +412,37 @@ def process_pending_panels(trip_id: str | None = None) -> list[dict]:
             except Exception:
                 pass
 
-        prompt_summary, prompt_events = _describe_gap_from_images(before_scene, after_scene)
-        final_summary = prompt_summary or (scene_row.get("summary") or "旅の記憶をまとめた一コマです。")
+        # 画像を描かせるための指示文。これは画面には出しません。
+        image_prompt, prompt_events = _describe_gap_from_images(before_scene, after_scene)
+
+        # 画面に出す日記の文章は別に作ります。
+        # image_prompt をそのまま summary に入れると、
+        # 「前の場面: … 次の場面: …」がユーザーに見えてしまいます。
+        before_text = (before_scene or {}).get("summary")
+        after_text = (after_scene or {}).get("summary")
+        gap_context = _gap_context(scene_row, before_scene, after_scene)
+        if gap_context:
+            print(f"[ワーカー] 空白コマの前提:\n{gap_context}")
+
+        try:
+            final_summary = write_gap_diary_text(before_text, after_text, context=gap_context or None)
+        except Exception:
+            traceback.print_exc()
+            final_summary = scene_row.get("summary") or "写真は残っていませんが、次の場所へ向かう時間でした。"
+
+        print(f"[ワーカー] 空白コマの文章: {final_summary[:60]}")
 
         generated_path = f"generated/{panel_id}.png"
         try:
+            # 画面に出す日記文をそのまま絵の題材にします。
+            # _describe_gap_from_images はシーンの行から写真を読めず、
+            # 「旅の記憶をまとめた一コマです」のような中身のない指示文になるためです。
             illustration = generate_diary_illustration(final_summary, events=prompt_events or [])
             supabase.storage.from_("photos").upload(generated_path, illustration, file_options={"content-type": "image/png", "upsert": "true"})
+            print(f"[ワーカー] 画像を保存しました {generated_path}")
         except Exception:
+            # 黙って None にすると、絵が出ない理由が分からなくなる
+            traceback.print_exc()
             generated_path = None
 
         supabase.table("scenes").update({"summary": final_summary}).eq("id", scene_id).execute()
