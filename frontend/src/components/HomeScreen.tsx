@@ -87,7 +87,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               whitespace-nowrap
             "
           >
-            TABI MEMORY
+           MemoriTrip
           </h1>
 
           {/* Login / Profile */}

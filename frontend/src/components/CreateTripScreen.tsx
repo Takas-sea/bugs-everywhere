@@ -37,7 +37,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           <div>
             <h1 className="text-3xl sm:text-4xl font-extrabold font-title tracking-tight text-slate-900">
-              TABI MEMORY
+              MemoriTrip
             </h1>
 
             <p className="text-base sm:text-lg text-slate-600 font-diary mt-1.5 tracking-wide">

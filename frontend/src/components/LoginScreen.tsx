@@ -7,7 +7,7 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 
-import tabiMemoryIcon from '../assets/tabi-memory-icon.png';
+import tabiMemoryIcon from '../../assets/tabi-memory-icon.png';
 
 interface LoginScreenProps {
   onLogin: (email: string) => void;
@@ -91,7 +91,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           />
 
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
-            TABI MEMORY
+            MemoriTrip
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
