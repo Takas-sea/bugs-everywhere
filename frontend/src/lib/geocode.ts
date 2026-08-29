@@ -25,11 +25,14 @@ const NOMINATIM = "https://nominatim.openstreetmap.org/reverse";
 const OVERPASS = "https://overpass-api.de/api/interpreter";
 
 const MIN_INTERVAL_MS = 1100; // 利用規約：1秒に1回まで
+const SHOP_MARGIN_M = 25; // 1番目と2番目の差がこれ以上なら「はっきり近い」
 const CACHE_PRECISION = 3; // 小数3桁 ≒ 110m。同じスポットは1回で済ませる
 // 施設の探し方は2段階。「行き先になる場所」は少し広く、
 // 「たまたま近くにあるだけの店」はごく近くだけを見る。
 const LANDMARK_RADIUS_M = 150; // 観光地・史跡・寺社・公園・駅
-const SHOP_RADIUS_M = 60;      // 飲食店・商店。GPSのずれで隣の店を拾わない距離
+const SHOP_RADIUS_M = 60;      // 飲食店・商店を探す範囲
+// 店が密集している場所では、どれが正解かGPSの精度では決められません。
+// 2番目の候補がこの距離より近いなら、競っているとみなして店名を諦めます。
 
 export type Place = {
   /** 具体的な場所。「東大寺」「大豆山町」など。取れなければ null */
@@ -161,8 +164,10 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
   const json = (await res.json()) as { elements?: OverpassElement[] };
   const elements = json.elements ?? [];
 
-  let best: string | null = null;
-  let bestScore = Infinity;
+  // 強い候補（観光地・駅など）と、弱い候補（店）を分けて集める
+  type Cand = { name: string; dist: number };
+  const strongs: Cand[] = [];
+  const weaks: Cand[] = [];
 
   for (const el of elements) {
     const name = el.tags?.["name:ja"] ?? el.tags?.name;
@@ -171,19 +176,39 @@ async function findLandmark(lat: number, lng: number): Promise<string | null> {
     const eLng = el.lon ?? el.center?.lon;
     if (eLat === undefined || eLng === undefined) continue;
 
-    const d = distanceMeters(lat, lng, eLat, eLng);
-    const weakOne = isWeak(el);
-    if (weakOne && d > SHOP_RADIUS_M) continue;
-    if (d > LANDMARK_RADIUS_M) continue;
-
-    // 弱い候補は、同じ距離なら強い候補に負けるようにする
-    const score = weakOne ? d + LANDMARK_RADIUS_M : d;
-    if (score < bestScore) {
-      bestScore = score;
-      best = name;
+    const dist = distanceMeters(lat, lng, eLat, eLng);
+    if (isWeak(el)) {
+      if (dist <= SHOP_RADIUS_M) weaks.push({ name, dist });
+    } else if (dist <= LANDMARK_RADIUS_M) {
+      strongs.push({ name, dist });
     }
   }
-  return best;
+
+  // 強い候補があれば、一番近いものを採用する
+  if (strongs.length > 0) {
+    strongs.sort((a, b) => a.dist - b.dist);
+    return strongs[0].name;
+  }
+
+  if (weaks.length === 0) return null;
+
+  // 同じ店が点と面の両方で登録されていることがあるので、名前でまとめる
+  const byName = new Map<string, number>();
+  for (const w of weaks) {
+    const prev = byName.get(w.name);
+    if (prev === undefined || w.dist < prev) byName.set(w.name, w.dist);
+  }
+
+  const sorted = [...byName.entries()]
+    .map(([name, dist]) => ({ name, dist }))
+    .sort((a, b) => a.dist - b.dist);
+
+  // 2番目が近すぎるなら、どちらが正解かGPSの精度では決められない。
+  // 当てずっぽうの店名を出すより、町名に落としたほうが害が小さい。
+  if (sorted.length > 1 && sorted[1].dist - sorted[0].dist < SHOP_MARGIN_M) {
+    return null;
+  }
+  return sorted[0].name;
 }
 
 /** 飲食店や商店など、「たまたま近くにあるだけ」かもしれない候補か */
