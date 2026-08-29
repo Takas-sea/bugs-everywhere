@@ -44,79 +44,6 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 
-/* =========================================================
-   デフォルトで表示するAI補完シーン
-   画像は frontend/public/ai-shinkansen.png に置く
-========================================================= */
-
-const DEFAULT_AI_IMAGE_URL = '/ai-shinkansen.png';
-
-const DEFAULT_AI_LOCATION = '新幹線で移動';
-
-const DEFAULT_AI_DIARY_TEXT =
-  '駅のホームで新幹線を待ち、列車に乗って次の目的地へ向かいました。移動中は車窓を眺めながら、これまでの出来事を振り返ったり、この先の予定を話したり。写真には残っていない移動時間も、旅の流れをつなぐ大切なひとときでした。';
-
-
-/* 1枚目と2枚目の写真の時刻の中間を求める */
-const getMidpointTime = (
-  start?: string,
-  end?: string
-) => {
-
-  const parse = (value?: string) => {
-
-    const match = value?.match(
-      /(\d{1,2}):(\d{2})/
-    );
-
-    if (!match) {
-      return null;
-    }
-
-    return (
-      Number(match[1]) * 60 +
-      Number(match[2])
-    );
-  };
-
-
-  const startMinutes = parse(start);
-  const endMinutes = parse(end);
-
-
-  if (
-    startMinutes === null ||
-    endMinutes === null ||
-    endMinutes <= startMinutes
-  ) {
-    return '移動中';
-  }
-
-
-  const midpoint =
-    Math.floor(
-      (startMinutes + endMinutes) / 2
-    );
-
-
-  const hours =
-    Math.floor(midpoint / 60);
-
-  const minutes =
-    midpoint % 60;
-
-
-  return `${String(hours).padStart(
-    2,
-    '0'
-  )}:${String(minutes).padStart(
-    2,
-    '0'
-  )}`;
-};
-
-
-
 interface DiaryDetailScreenProps {
 
   trip: Trip;
@@ -455,61 +382,9 @@ React.FC<DiaryDetailScreenProps> = ({
     );
 
 
-  const displayedEntries =
-    filteredEntries.filter(
-      (entry, index, entries) => {
-
-        const normalize = (
-          value?: string
-        ) =>
-          (value ?? '')
-            .trim()
-            .toLowerCase();
-
-
-        const entryKey =
-          `${normalize(entry.time)}|${normalize(entry.location)}`;
-
-
-        const firstIndex =
-          entries.findIndex(
-            (candidate) => {
-
-              const candidateKey =
-                `${normalize(candidate.time)}|${normalize(candidate.location)}`;
-
-
-              return (
-                candidateKey ===
-                entryKey
-              );
-            }
-          );
-
-
-        return (
-          firstIndex ===
-          index
-        );
-      }
-    );
-
-
-
-  /* AIシーンは1件目と2件目の中間時刻にする */
-
-  const aiInsertTime =
-    getMidpointTime(
-
-      displayedEntries[0]
-        ?.time,
-
-      displayedEntries[1]
-        ?.time
-
-    );
-
-
+  /* 以前は 時刻|場所名 で重複を除いていましたが、場所名が空のコマ同士で
+     時刻が近いと本物のコマまで消えるため、そのまま表示します */
+  const displayedEntries = filteredEntries;
 
   const handleShare = () => {
 
@@ -1434,6 +1309,10 @@ React.FC<DiaryDetailScreenProps> = ({
                   editingEntryId ===
                   entry.id;
 
+                /* 写真が1枚も無いコマ。AIが前後の流れから想像して描いたもの */
+                const isGapEntry = !entry.photoId;
+
+
 
                 return (
 
@@ -1459,15 +1338,19 @@ React.FC<DiaryDetailScreenProps> = ({
 
                       <div className="absolute -left-6 sm:-left-10 top-6 w-6 sm:w-10 h-6 sm:h-10 rounded-full bg-white border-3 border-blue-600 shadow-md flex items-center justify-center text-[10px] sm:text-xs font-bold text-blue-700 group-hover:scale-110 group-hover:bg-blue-50 transition-all">
 
-                        {index === 0
-                          ? 1
-                          : index + 2}
+                        {index + 1}
 
                       </div>
 
 
 
-                      <div className="bg-white rounded-3xl border border-slate-200 shadow-md shadow-slate-200/60 hover:shadow-xl hover:border-blue-300 transition-all duration-300 overflow-hidden">
+                      <div
+                        className={`rounded-3xl shadow-md transition-all duration-300 overflow-hidden ${
+                          isGapEntry
+                            ? 'bg-blue-50/40 border-2 border-dashed border-blue-400/70 shadow-blue-100/60'
+                            : 'bg-white border border-slate-200 shadow-slate-200/60 hover:shadow-xl hover:border-blue-300'
+                        }`}
+                      >
 
 
                         <div className="p-5 sm:p-6 pb-4 border-b border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-transparent flex flex-wrap items-center justify-between gap-3">
@@ -1483,6 +1366,14 @@ React.FC<DiaryDetailScreenProps> = ({
                               {entry.time}
 
                             </span>
+
+                            {isGapEntry && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-600 text-white text-[11px] font-bold">
+                                <Sparkles className="w-3 h-3" />
+                                写真が残っていない時間
+                              </span>
+                            )}
+
 
 
 
@@ -1695,7 +1586,7 @@ React.FC<DiaryDetailScreenProps> = ({
 
                                 <div className="absolute top-2 left-2 px-2.5 py-0.5 rounded-full bg-blue-700/90 backdrop-blur-xs text-[10px] text-white font-bold">
 
-                                  実写写真
+                                  {isGapEntry ? 'AIが描いた一コマ' : '実写写真'}
 
                                 </div>
 
@@ -1867,234 +1758,6 @@ React.FC<DiaryDetailScreenProps> = ({
                         1枚目と2枚目の間にAI補完シーンを挿入
                     ================================================== */}
 
-                    {index === 0 && (
-
-                      <div
-
-                        id="default-ai-complement-entry"
-
-                        className="relative group"
-
-                      >
-
-
-                        {/* タイムライン番号 */}
-
-                        <div className="absolute -left-6 sm:-left-10 top-6 w-6 sm:w-10 h-6 sm:h-10 rounded-full bg-violet-50 border-3 border-violet-600 shadow-md flex items-center justify-center text-[10px] sm:text-xs font-bold text-violet-700 group-hover:scale-110 transition-all">
-
-                          2
-
-                        </div>
-
-
-
-                        {/* AIカード */}
-
-                        <div className="bg-white rounded-3xl border-2 border-violet-200 shadow-md shadow-violet-100/70 hover:shadow-xl transition-all duration-300 overflow-hidden">
-
-
-                          {/* AIカード上部 */}
-
-                          <div className="p-5 sm:p-6 pb-4 border-b border-violet-100 bg-gradient-to-r from-violet-50 via-white to-fuchsia-50 flex flex-wrap items-center justify-between gap-3">
-
-
-                            <div className="flex flex-wrap items-center gap-2.5">
-
-
-                              <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-violet-100 text-violet-800 text-xs font-bold font-mono">
-
-                                <Clock className="w-3 h-3 text-violet-600" />
-
-                                {aiInsertTime}
-
-                              </span>
-
-
-
-                              <h3 className="text-base sm:text-xl font-bold text-slate-800">
-
-                                {DEFAULT_AI_LOCATION}
-
-                              </h3>
-
-
-
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-600 text-white text-xs font-bold shadow-sm">
-
-                                <Sparkles className="w-3.5 h-3.5" />
-
-                                AI生成画像
-
-                              </span>
-
-
-                            </div>
-
-
-                          </div>
-
-
-
-                          {/* AI画像 + AI日記 */}
-
-                          <div className="p-5 sm:p-7">
-
-
-                            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-
-
-                              {/* AI画像 */}
-
-                              <div className="md:col-span-6">
-
-
-                                <div
-
-                                  onClick={() =>
-                                    onSelectPhotoLightbox(
-
-                                      DEFAULT_AI_IMAGE_URL,
-
-                                      DEFAULT_AI_DIARY_TEXT,
-
-                                      DEFAULT_AI_LOCATION
-
-                                    )
-                                  }
-
-                                  className="relative rounded-2xl overflow-hidden shadow-sm group/ai-photo cursor-pointer bg-slate-100 aspect-4/3 border-2 border-violet-200"
-
-                                >
-
-
-                                  <img
-
-                                    src={
-                                      DEFAULT_AI_IMAGE_URL
-                                    }
-
-                                    alt="AIが生成した新幹線で移動する場面"
-
-                                    className="w-full h-full object-cover group-hover/ai-photo:scale-105 transition-transform duration-500"
-
-                                  />
-
-
-
-                                  <div className="absolute inset-0 bg-black/0 group-hover/ai-photo:bg-black/20 transition-colors flex items-center justify-center">
-
-
-                                    <span className="opacity-0 group-hover/ai-photo:opacity-100 px-3 py-1.5 rounded-full bg-white/95 text-xs font-bold text-slate-800 shadow-sm transition-opacity flex items-center gap-1.5">
-
-                                      <Sparkles className="w-3.5 h-3.5 text-violet-600" />
-
-                                      AI画像を拡大表示
-
-                                    </span>
-
-
-                                  </div>
-
-
-
-                                  {/* 画像そのものにもAI生成画像表示 */}
-
-                                  <div className="absolute top-2 left-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-violet-700/95 backdrop-blur-xs text-[10px] text-white font-bold shadow-sm">
-
-                                    <Sparkles className="w-3 h-3" />
-
-                                    AI生成画像
-
-                                  </div>
-
-
-                                </div>
-
-
-                              </div>
-
-
-
-                              {/* AI生成画像の日記 */}
-
-                              <div className="md:col-span-6 flex flex-col gap-4">
-
-
-                                <div>
-
-
-                                  <div className="flex items-center gap-2 mb-2">
-
-                                    <Sparkles className="w-4 h-4 text-violet-600" />
-
-                                    <span className="text-xs font-bold text-violet-700">
-
-                                      AIが補完した日記
-
-                                    </span>
-
-                                  </div>
-
-
-
-                                  <div className="relative pl-4 border-l-3 border-violet-400 py-1">
-
-
-                                    <p className="text-sm sm:text-base text-slate-700 leading-relaxed whitespace-pre-line">
-
-                                      {DEFAULT_AI_DIARY_TEXT}
-
-                                    </p>
-
-
-                                  </div>
-
-
-                                </div>
-
-
-
-                                {/* AIであることの説明 */}
-
-                                <div className="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-
-
-                                  <div className="flex items-center gap-2 text-violet-800 font-bold text-xs sm:text-sm">
-
-                                    <Sparkles className="w-4 h-4" />
-
-                                    AIによる補完
-
-                                  </div>
-
-
-
-                                  <p className="mt-2 text-xs sm:text-sm leading-relaxed text-violet-700">
-
-                                    この画像と日記は、前後の写真・撮影時刻・位置情報をもとにAIが補完したイメージです。
-                                    実際に撮影された写真や、実際の出来事を断定する記録ではありません。
-
-                                  </p>
-
-
-                                </div>
-
-
-                              </div>
-
-
-                            </div>
-
-
-                          </div>
-
-
-                        </div>
-
-
-                      </div>
-
-                    )}
 
 
                   </React.Fragment>

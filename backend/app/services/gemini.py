@@ -13,6 +13,7 @@ load_dotenv()
 
 _api_key = os.getenv("GEMINI_API_KEY")
 _model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+_image_model_name = os.getenv("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image")
 client = None
 if _api_key:
     try:
@@ -111,9 +112,54 @@ def generate_image(summary: str, events: list[str] | None = None) -> bytes:
 
 
 def generate_diary_illustration(summary: str, events: list[str] | None = None) -> bytes:
+    """空白の時間の絵を作る。
+
+    まず Gemini の画像生成モデルに描かせます。失敗したとき（クォータ切れ、
+    ネットワーク、モデルが使えないなど）は、下の _draw_placeholder_illustration
+    で簡易的な風景を描いて返します。絵が無いとコマが空になってしまうため、
+    ここでは例外を投げずに必ず何かを返します。
+    """
     if not summary:
         raise ValueError("A diary summary is required to generate an illustration.")
 
+    if client is not None:
+        try:
+            return _generate_illustration_with_gemini(summary, events)
+        except Exception as exc:
+            print("画像生成エラー（代替の絵を使います）:", repr(exc))
+
+    return _draw_placeholder_illustration(summary)
+
+
+def _generate_illustration_with_gemini(
+    summary: str, events: list[str] | None = None
+) -> bytes:
+    """Gemini に絵を描かせる。失敗したら例外を投げる。"""
+    import base64
+
+    hints = "、".join([e for e in (events or []) if e])[:200]
+    prompt = (
+        "旅の絵日記に載せる、やわらかい水彩風のイラストを1枚描いてください。"
+        "写真が残っていない時間帯を想像で補う挿絵です。"
+        "文字は入れないでください。人物の顔は描き込まないでください。"
+        f"場面: {summary}"
+    )
+    if hints:
+        prompt += f" 手がかり: {hints}"
+
+    interaction = client.interactions.create(
+        model=_image_model_name,
+        input=prompt,
+    )
+
+    data = getattr(getattr(interaction, "output_image", None), "data", None)
+    if not data:
+        raise RuntimeError("画像が返ってきませんでした")
+
+    return base64.b64decode(data)
+
+
+def _draw_placeholder_illustration(summary: str) -> bytes:
     try:
         from PIL import Image, ImageDraw, ImageFilter
     except Exception as exc:
