@@ -81,7 +81,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               whitespace-nowrap
             "
           >
-           MemoriTrip
+           MemoryTrip
           </h1>
 
           {/* Login / Profile */}
