@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -93,6 +94,22 @@ def _build_diary_prompt(summary: str, events: list[str] | None = None) -> str:
     """.strip()
 
 
+def write_gap_text(before_summary: str | None, after_summary: str | None) -> str:
+    before = before_summary or "前の時間の雰囲気"
+    after = after_summary or "次の時間の雰囲気"
+    return (
+        "空白の時間を埋める1枚の旅行イラストです。 "
+        f"前の場面: {before}。 "
+        f"次の場面: {after}。 "
+        "前後の写真的な流れを自然につなぎ、同じ旅の記憶として一枚の景色にしてください。 "
+        "時間の経過が自然に見えるように、光、空、立ち止まる余韻、人物や風景が続いている感じを出してください。"
+    )
+
+
+def generate_image(summary: str, events: list[str] | None = None) -> bytes:
+    return generate_diary_illustration(summary=summary, events=events)
+
+
 def generate_diary_illustration(summary: str, events: list[str] | None = None) -> bytes:
     if not summary:
         raise ValueError("A diary summary is required to generate an illustration.")
@@ -102,12 +119,33 @@ def generate_diary_illustration(summary: str, events: list[str] | None = None) -
     except Exception as exc:
         raise RuntimeError("Pillow is required to generate diary illustrations.") from exc
 
+    normalized = re.sub(r"[^0-9A-Za-zぁ-んァ-ン一-龥]+", " ", summary)
+    token_values = [ord(ch) for ch in normalized if ch.strip()]
+    seed = int(hashlib.sha256(summary.encode("utf-8")).hexdigest()[:8], 16)
+    mood_seed = sum(token_values) % 7
+    sky_top = [
+        (15, 26, 55),
+        (145, 120, 180),
+        (150, 190, 220),
+        (120, 140, 160),
+        (80, 110, 150),
+        (160, 170, 210),
+        (120, 95, 140),
+    ][mood_seed % 7]
+    sky_bottom = [
+        (53, 78, 123),
+        (255, 181, 112),
+        (255, 198, 166),
+        (188, 154, 120),
+        (120, 145, 170),
+        (224, 204, 180),
+        (200, 155, 135),
+    ][mood_seed % 7]
+
     width, height = 1200, 1200
     img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
 
-    sky_top = (150, 190, 220)
-    sky_bottom = (255, 198, 166)
     for y in range(height):
         ratio = y / height
         r = int(sky_top[0] * (1 - ratio) + sky_bottom[0] * ratio)
@@ -117,39 +155,70 @@ def generate_diary_illustration(summary: str, events: list[str] | None = None) -
 
     glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     glow_draw = ImageDraw.Draw(glow)
-    glow_draw.ellipse((700, 80, 1050, 430), fill=(255, 214, 120, 180))
-    glow_draw.ellipse((740, 120, 1010, 390), fill=(255, 236, 170, 150))
+    glow_size = 240 + ((seed >> 4) % 140)
+    glow_x = 700 + ((seed >> 2) % 180)
+    glow_y = 60 + ((seed >> 6) % 80)
+    glow_draw.ellipse((glow_x, glow_y, glow_x + glow_size, glow_y + glow_size * 0.7), fill=(255, 214, 120, 180))
+    glow_draw.ellipse((glow_x + 30, glow_y + 20, glow_x + glow_size - 30, glow_y + glow_size * 0.7 - 20), fill=(255, 236, 170, 150))
     img = Image.alpha_composite(img, glow)
 
-    cloud_color = (255, 255, 255, 70)
+    cloud_color = (255, 255, 255, 60 + (seed % 30))
     for cx, cy, rx, ry in [(200, 230, 140, 50), (480, 205, 160, 55), (780, 250, 180, 60), (970, 180, 140, 45)]:
-        draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=cloud_color)
+        draw.ellipse((cx - rx + (seed % 12), cy - ry + (seed % 9), cx + rx + (seed % 12), cy + ry + (seed % 9)), fill=cloud_color)
 
-    mountain_layers = [
-        ((0, 620), (170, 440), (360, 650), (530, 430), (740, 680), (910, 470), (1110, 640), (1200, 760), (0, 760)),
-        ((0, 720), (160, 560), (340, 740), (550, 600), (760, 760), (980, 610), (1200, 720), (1200, 860), (0, 860)),
-    ]
-    mountain_colors = [(64, 88, 96), (90, 112, 110)]
-    for layer, color in zip(mountain_layers, mountain_colors):
-        draw.polygon(layer, fill=color)
+    landscape_bias = (seed % 5)
+    if landscape_bias in (0, 3):
+        mountain_layers = [
+            ((0, 620), (170, 440), (360, 650), (530, 430), (740, 680), (910, 470), (1110, 640), (1200, 760), (0, 760)),
+            ((0, 720), (160, 560), (340, 740), (550, 600), (760, 760), (980, 610), (1200, 720), (1200, 860), (0, 860)),
+        ]
+        mountain_colors = [(64 + (seed % 30), 88 + (seed % 20), 96), (90 + (seed % 20), 112 + (seed % 18), 110)]
+        for layer, color in zip(mountain_layers, mountain_colors):
+            draw.polygon(layer, fill=color)
 
     ground = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ground_draw = ImageDraw.Draw(ground)
-    ground_draw.rectangle((0, 760, width, height), fill=(107, 136, 100, 220))
+    if landscape_bias in (1, 2):
+        ground_draw.rectangle((0, 760, width, height), fill=(88 + (seed % 15), 124 + (seed % 15), 146, 200))
+        for x in range(0, width, 80):
+            ground_draw.arc((x, 800, x + 120, 940), start=180, end=360, fill=(150 + (seed % 30), 200 + (seed % 20), 220, 170), width=4)
+        ground_draw.ellipse((200 + (seed % 180), 780, 1000 - (seed % 120), 1120), fill=(255, 190, 110, 90))
+    else:
+        ground_draw.rectangle((0, 760, width, height), fill=(101 + (seed % 20), 132 + (seed % 15), 96 + (seed % 18), 220))
+        for x in range(0, width, 90):
+            ground_draw.ellipse((x, 700, x + 64, 930), fill=(54 + (seed % 18), 95 + (seed % 20), 70 + (seed % 10), 160))
     img = Image.alpha_composite(img, ground)
 
     path = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     path_draw = ImageDraw.Draw(path)
-    path_draw.polygon([(0, 860), (350, 760), (470, 760), (620, 860), (760, 860), (860, 960), (0, 1200)], fill=(200, 176, 127, 230))
-    path_draw.polygon([(620, 860), (760, 860), (980, 1200), (820, 1200)], fill=(177, 149, 101, 220))
+    path_draw.polygon([(0, 860), (350, 760), (470, 760), (620, 860), (760, 860), (860, 960), (0, 1200)], fill=(200 + (seed % 25), 176, 127, 230))
+    path_draw.polygon([(620, 860), (760, 860), (980, 1200), (820, 1200)], fill=(177 + (seed % 18), 149, 101, 220))
     img = Image.alpha_composite(img, path)
+
+    if landscape_bias in (0, 4):
+        skyline = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        sdraw = ImageDraw.Draw(skyline)
+        for x in range(100, 1100, 120):
+            building_h = 180 + ((seed + x) % 120)
+            sdraw.rectangle((x, 760 - building_h, x + 70 + (seed % 10), 760), fill=(110 + (seed % 20), 120, 136, 180))
+            sdraw.rectangle((x + 18, 720 - building_h, x + 52, 760 - building_h + 30), fill=(220, 205, 165, 220))
+        img = Image.alpha_composite(img, skyline)
+
+    if landscape_bias in (1, 5):
+        blossom = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(blossom)
+        for x in range(80, width - 120, 100):
+            for y in range(180, 520, 80):
+                bdraw.ellipse((x + (seed % 8), y, x + 28 + (seed % 10), y + 28), fill=(255, 180 + (seed % 20), 205, 200))
+        img = Image.alpha_composite(img, blossom)
 
     figure = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     fdraw = ImageDraw.Draw(figure)
-    fdraw.ellipse((268, 700, 320, 760), fill=(77, 65, 58, 220))
-    fdraw.line((294, 760, 294, 855), fill=(77, 65, 58, 220), width=8)
-    fdraw.line((294, 785, 330, 830), fill=(77, 65, 58, 220), width=6)
-    fdraw.line((294, 785, 256, 832), fill=(77, 65, 58, 220), width=6)
+    figure_x = 220 + (seed % 170)
+    fdraw.ellipse((figure_x, 700, figure_x + 52, 760), fill=(77, 65, 58, 220))
+    fdraw.line((figure_x + 26, 760, figure_x + 26, 855), fill=(77, 65, 58, 220), width=8)
+    fdraw.line((figure_x + 26, 785, figure_x + 62, 830), fill=(77, 65, 58, 220), width=6)
+    fdraw.line((figure_x + 26, 785, figure_x - 12, 832), fill=(77, 65, 58, 220), width=6)
     img = Image.alpha_composite(img, figure)
 
     vignette = Image.new("RGBA", (width, height), (0, 0, 0, 0))

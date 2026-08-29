@@ -365,7 +365,8 @@ def test_gap_scene_uses_before_after_photo_context_in_prompt(monkeypatch):
 
     def fake_analyze_images(images, image_names=None):
         recorded["images_seen"] = len(images)
-        return {"summary": "海辺の夕方に歩いた", "events": ["海辺を散歩", "夕焼けを眺めた"]}
+        recorded["image_names"] = image_names
+        return {"summary": "海辺の夕方に歩いたあと、港町の夜道へ続く", "events": ["海辺を散歩", "夕焼けを眺めた", "港町へ移動した"]}
 
     def fake_generate_diary_illustration(summary, events=None, **kwargs):
         recorded["summary"] = summary
@@ -415,16 +416,150 @@ def test_gap_scene_uses_before_after_photo_context_in_prompt(monkeypatch):
     )
 
     assert result[1]["is_gap"] is False
+    assert recorded["images_seen"] == 2
+    assert recorded["image_names"] == ["trip_1/early.jpg", "trip_1/late.jpg"]
     assert "前の写真" in recorded["summary"]
     assert "次の写真" in recorded["summary"]
-    assert "海辺の夕方に歩いた" in recorded["summary"]
-    assert "港町を散策した" in recorded["summary"]
+    assert "海辺の夕方に歩いたあと" in recorded["summary"]
+    assert "港町" in recorded["summary"]
+
+
+def test_fill_gap_scenes_for_trip_respects_mode_and_keeps_is_gap(monkeypatch):
+    scene_updates = []
+    panel_updates = []
+
+    def fake_generate_diary_illustration(summary, events=None, **kwargs):
+        return b"generated-illustration"
+
+    def fake_analyze_images(images, image_names=None):
+        return {"summary": "東大寺の朝。鹿がのんびり歩いていて、思ったより人が少なかった。", "events": ["朝の散歩", "鹿を見た"]}
+
+    class FakeSceneTable:
+        def __init__(self):
+            self.rows = [{
+                "id": "scene-1",
+                "trip_id": "trip-1",
+                "seq": 3,
+                "is_gap": True,
+                "photo_ids": ["trip-1/photo-3.jpg"],
+                "summary": "旧プロンプト",
+            }]
+            self._eq = None
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, key, value):
+            self._eq = (key, value)
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            if self._eq == ("trip_id", "trip-1") or self._eq == ("is_gap", True):
+                return type("Resp", (), {"data": self.rows})()
+            return type("Resp", (), {"data": []})()
+
+        def update(self, payload):
+            scene_updates.append(payload)
+            return self
+
+    class FakePanelTable:
+        def __init__(self):
+            self.rows = [{"id": "panel-1", "scene_id": "scene-1", "mode": "i2i", "status": "pending", "image_path": None}]
+            self._eq = None
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, key, value):
+            self._eq = (key, value)
+            return self
+
+        def order(self, *_args, **_kwargs):
+            return self
+
+        def execute(self):
+            if self._eq == ("scene_id", "scene-1"):
+                return type("Resp", (), {"data": self.rows})()
+            return type("Resp", (), {"data": []})()
+
+        def update(self, payload):
+            panel_updates.append(payload)
+            return self
+
+    class FakePhotosTable:
+        def __init__(self):
+            self.rows = [{"id": "trip-1/photo-3.jpg", "storage_path": "trip-1/photo-3.jpg"}]
+            self._eq = None
+
+        def select(self, *_args, **_kwargs):
+            return self
+
+        def eq(self, key, value):
+            self._eq = (key, value)
+            return self
+
+        def execute(self):
+            if self._eq == ("id", "trip-1/photo-3.jpg"):
+                return type("Resp", (), {"data": self.rows})()
+            return type("Resp", (), {"data": []})()
+
+    class FakeStorage:
+        def from_(self, bucket_name):
+            return self
+
+        def upload(self, *args, **kwargs):
+            return {"path": "trip-1/generated_gap_scene-1.png"}
+
+        def list(self, prefix=""):
+            return []
+
+        def remove(self, *args, **kwargs):
+            return []
+
+    class FakeSupabase:
+        def __init__(self):
+            self.storage = FakeStorage()
+            self._scene_table = FakeSceneTable()
+            self._panel_table = FakePanelTable()
+            self._photo_table = FakePhotosTable()
+
+        def table(self, name):
+            if name == "scenes":
+                return self._scene_table
+            if name == "panels":
+                return self._panel_table
+            if name == "photos":
+                return self._photo_table
+            raise AssertionError(name)
+
+    monkeypatch.setattr("app.services.diary_generator.supabase", FakeSupabase())
+    monkeypatch.setattr("app.services.diary_generator.get_image", lambda path: b"photo-bytes")
+    monkeypatch.setattr("app.services.diary_generator.analyze_images", fake_analyze_images)
+    monkeypatch.setattr("app.services.diary_generator.generate_diary_illustration", fake_generate_diary_illustration)
+
+    __import__("app.services.diary_generator", fromlist=["fill_gap_scenes_for_trip"]).fill_gap_scenes_for_trip("trip-1")
+
+    assert panel_updates[-1]["status"] == "done"
+    assert scene_updates[-1]["summary"] == "東大寺の朝。鹿がのんびり歩いていて、思ったより人が少なかった。"
+    assert all("is_gap" not in payload for payload in scene_updates)
 
 
 def test_generate_diary_illustration_returns_png_bytes():
     png = gemini.generate_diary_illustration("寺院で桜を見ました。", ["鹿も見かけました"])
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     assert len(png) > 1000
+
+
+def test_generate_diary_illustration_changes_by_summary_context():
+    beach = gemini.generate_diary_illustration("海辺の夕方で波と風が強かった。", ["散歩して夕焼けを見た"])
+    city = gemini.generate_diary_illustration("夜の街で駅前を歩いて、明かりがきれいだった。", ["ラストの散歩"])
+
+    assert beach.startswith(b"\x89PNG\r\n\x1a\n")
+    assert city.startswith(b"\x89PNG\r\n\x1a\n")
+    assert beach != city
 
 
 def test_download_day_folder(monkeypatch):
@@ -504,3 +639,28 @@ def test_analyze_images_parses_markdown_json(monkeypatch):
 
     assert result["summary"] == "ok"
     assert result["events"] == ["event1"]
+
+
+def test_write_gap_text_uses_before_and_after_summaries():
+    text = gemini.write_gap_text("朝の寺院を散策した", "夕方の港町を歩いた")
+
+    assert "空白の時間" in text
+    assert "朝の寺院を散策した" in text
+    assert "夕方の港町を歩いた" in text
+
+
+def test_generate_image_wrapper_calls_diary_illustration(monkeypatch):
+    captured = {}
+
+    def fake_generate_diary_illustration(summary, events=None):
+        captured["summary"] = summary
+        captured["events"] = events
+        return b"generated-by-wrapper"
+
+    monkeypatch.setattr(gemini, "generate_diary_illustration", fake_generate_diary_illustration)
+
+    result = gemini.generate_image("港町の夕方を歩いて、灯りがきれいだった")
+
+    assert result == b"generated-by-wrapper"
+    assert "港町の夕方" in captured["summary"]
+    assert captured["events"] is None
