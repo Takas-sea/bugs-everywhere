@@ -3,7 +3,7 @@ import {
  Calendar, Users, MapPin, Image as ImageIcon, Sparkles, Share2, 
  Download, UserPlus, Heart, Bookmark, ArrowLeft,
  Clock, Camera, Smile, Utensils, Mountain, Award, Edit3, Check,
- MessageCircle, Send, Plus, Flame, Sparkle
+ MessageCircle, Send, Plus, Flame, Sparkle, Printer
 } from 'lucide-react';
 import { Trip, DiaryTab, DiaryEntry, TripHighlight, MapSpot } from '../types';
 import { renameTrip } from '../lib/trips';
@@ -15,6 +15,8 @@ interface DiaryDetailScreenProps {
  onOpenInviteModal: () => void;
  onSelectPhotoLightbox: (photoUrl: string, caption?: string, spotName?: string) => void;
  onUploadMorePhotos?: () => void;
+ /** 一日の流れを1枚にまとめた表示へ */
+ onExportPoster?: () => void;
 }
 
 export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
@@ -23,6 +25,7 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  onOpenInviteModal,
  onSelectPhotoLightbox,
  onUploadMorePhotos,
+ onExportPoster,
 }) => {
  const [trip, setTrip] = useState<Trip>(initialTrip);
  const [activeTab, setActiveTab] = useState<DiaryTab>('diary');
@@ -193,6 +196,18 @@ export const DiaryDetailScreen: React.FC<DiaryDetailScreenProps> = ({
  <Plus className="w-3.5 h-3.5" />
  <span>写真を追加</span>
  </button>
+ )}
+
+ {onExportPoster && (
+   <button
+     onClick={onExportPoster}
+     id="export-poster-btn"
+     className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer flex items-center gap-1.5"
+     title="一日の流れを1枚にまとめる"
+   >
+     <Printer className="w-3.5 h-3.5 text-blue-600" />
+     <span>1枚にまとめる</span>
+   </button>
  )}
 
  {/* Share Button */}

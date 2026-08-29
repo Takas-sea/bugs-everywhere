@@ -103,6 +103,6 @@ export interface Trip {
 
 export type ActiveScreen =
   | 'home' | 'create_trip' | 'upload' | 'generating'
-  | 'diary' | 'memories' | 'map' | 'profile';
+  | 'diary' | 'memories' | 'map' | 'profile' | 'poster';
 
 export type DiaryTab = 'photos' | 'diary' | 'members' | 'map';

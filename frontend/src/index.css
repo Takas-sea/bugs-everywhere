@@ -35,3 +35,40 @@
 .stamp-shadow {
   box-shadow: 0 4px 20px -2px rgba(234, 88, 12, 0.12), 0 2px 6px -1px rgba(14, 165, 233, 0.08);
 }
+
+/* ---- 1枚にまとめた表示の印刷（PDFとして保存）用 ---- */
+
+@page {
+  size: A4 portrait;
+  margin: 0;
+}
+
+@media print {
+  /* #poster の中だけを紙に出す */
+  body * {
+    visibility: hidden;
+  }
+
+  #poster,
+  #poster * {
+    visibility: visible;
+  }
+
+  #poster {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    box-shadow: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* 背景色と枠線を印刷に反映させる（既定では省かれる） */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

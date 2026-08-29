@@ -32,6 +32,7 @@ import { UploadScreen } from './components/UploadScreen';
 import { GeneratingScreen } from './components/GeneratingScreen';
 import { DiaryDetailScreen } from './components/DiaryDetailScreen';
 import { MemoriesListScreen } from './components/MemoriesListScreen';
+import { PosterScreen } from './components/PosterScreen';
 import { InviteModal } from './components/InviteModal';
 import { PhotoLightbox } from './components/PhotoLightbox';
 
@@ -424,6 +425,7 @@ export default function App() {
                 setIsInviteModalOpen(true)
               }
               onSelectPhotoLightbox={handleOpenLightbox}
+              onExportPoster={() => changeScreen('poster')}
               onUploadMorePhotos={() => {
                 setCurrentTripDraft(selectedTrip);
                 setUploadBackScreen('diary');
@@ -431,6 +433,15 @@ export default function App() {
               }}
             />
           </>
+        )}
+
+        {/* ===================== 1枚にまとめる ===================== */}
+
+        {activeScreen === 'poster' && (
+          <PosterScreen
+            trip={selectedTrip}
+            onBack={() => changeScreen('diary')}
+          />
         )}
 
         {/* ===================== Memories ===================== */}
