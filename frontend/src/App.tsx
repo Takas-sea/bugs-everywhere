@@ -24,6 +24,7 @@ const EMPTY_TRIP: Trip = {
 };
 
 import { loadTrip, loadMyTrips } from './lib/adapters';
+import { subscribePanels } from './lib/realtime';
 
 import { HomeScreen } from './components/HomeScreen';
 import { LoginScreen } from './components/LoginScreen';
@@ -294,6 +295,31 @@ export default function App() {
     }
   }, [selectedTrip]);
 
+  /**
+   * 日記を開いている間、生成の進みを自動で取り込みます。
+   * コマが1つ仕上がるたびに通知が来るので、少し待ってからまとめて読み直します。
+   */
+  useEffect(() => {
+    if (activeScreen !== 'diary') return;
+    if (!selectedTrip || !UUID_RE.test(selectedTrip.id)) return;
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const unsubscribe = subscribePanels(selectedTrip.id, {
+      onChange: () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => { void refreshCurrentTrip(); }, 1200);
+      },
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+    // 読み直すたびに購読し直さないよう、旅行IDだけを見ています
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeScreen, selectedTrip?.id]);
+
   // =========================
   // Lightbox
   // =========================
@@ -366,15 +392,6 @@ export default function App() {
 
         {activeScreen === 'diary' && (
           <>
-            <div className="px-4 pt-4">
-              <button
-                onClick={refreshCurrentTrip}
-                className="px-3.5 py-1.5 rounded-full bg-white border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs cursor-pointer"
-              >
-                最新の状態に更新
-              </button>
-            </div>
-
             <DiaryDetailScreen
               trip={selectedTrip}
               onBack={() => changeScreen('home')}
