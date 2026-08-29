@@ -91,7 +91,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
           />
 
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-950">
-            MemoryTrip
+            MEMORYTRIP
           </h1>
 
           <p className="mt-2 text-sm text-slate-500">
