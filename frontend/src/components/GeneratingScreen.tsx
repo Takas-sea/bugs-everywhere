@@ -23,8 +23,6 @@ import {
 
 import { subscribePanels } from '../lib/realtime';
 
-import { supabase } from '../lib/supabase';
-
 import type { PanelStatus } from '../lib/types';
 
 
@@ -49,33 +47,33 @@ type Frame = {
 
 /**
  * これを過ぎても終わらなければ、
- * 生成が動いていない可能性を伝える
+ * Pythonバックエンド側のAI生成処理が
+ * 動いていない可能性を伝える
  */
 const SLOW_AFTER_MS = 60_000;
 
 
 /**
- * ★重要
+ * GeneratingScreen
  *
- * Supabase
+ * この画面自身はAI生成を開始しません。
  *
- * supabase/functions/generate-panels/index.ts
+ * Pythonバックエンドの main.py が
  *
- * という構成ならこのままでOK。
+ * process_pending_panels()
  *
- * 例えば
+ * を定期的に実行し、
+ * Supabase の pending panel を処理します。
  *
- * supabase/functions/generate-diary/index.ts
+ * この画面の役割は、
  *
- * なら
+ * 1. scenes / panels を読み込む
+ * 2. Supabase Realtime で panels の状態を監視
+ * 3. pending → running → done / failed を表示
+ * 4. 全コマ終了後に日記画面へ進む
  *
- * const GENERATE_FUNCTION_NAME = 'generate-diary';
- *
- * に変更してください。
+ * です。
  */
-const GENERATE_FUNCTION_NAME = 'generate-panels';
-
-
 export const GeneratingScreen:
 React.FC<GeneratingScreenProps> = ({
   tripId,
@@ -113,16 +111,9 @@ React.FC<GeneratingScreenProps> = ({
 
 
   /**
-   * confetti を複数回実行しないため
+   * 完了処理を複数回実行しないため
    */
   const celebrated =
-    useRef(false);
-
-
-  /**
-   * Edge Function を何度も呼ばないため
-   */
-  const generationStarted =
     useRef(false);
 
 
@@ -220,6 +211,8 @@ React.FC<GeneratingScreenProps> = ({
 
         setFrames(list);
 
+        setError(null);
+
         setLoading(false);
 
       } catch (e) {
@@ -256,173 +249,15 @@ React.FC<GeneratingScreenProps> = ({
 
   /* =========================================================
      2.
-     ★AI生成を開始する
-
-     今まで不足していた部分です。
-
-     panels が作成されたあと、
-     Supabase Edge Function を呼び出します。
-  ========================================================= */
-
-  useEffect(() => {
-
-    /*
-     * 旅行IDがない
-     */
-    if (!tripId) {
-      return;
-    }
-
-
-    /*
-     * scenes / panels の取得中
-     */
-    if (loading) {
-      return;
-    }
-
-
-    /*
-     * panels がまだ無い
-     */
-    if (frames.length === 0) {
-      return;
-    }
-
-
-    /*
-     * 同じ画面で2回以上起動しない
-     */
-    if (
-      generationStarted.current
-    ) {
-      return;
-    }
-
-
-    /*
-     * すでに全部完了している場合は
-     * Edge Functionを呼び直さない
-     */
-    const hasUnfinished =
-      frames.some(
-        (frame) =>
-          frame.status ===
-            'pending' ||
-          frame.status ===
-            'running',
-      );
-
-
-    if (!hasUnfinished) {
-
-      console.log(
-        '[GeneratingScreen] すでに生成済みです',
-      );
-
-      return;
-    }
-
-
-    generationStarted.current =
-      true;
-
-
-    const startGeneration =
-      async () => {
-
-        try {
-
-          setError(null);
-
-
-          console.log(
-            '[GeneratingScreen] AI生成開始',
-            {
-              tripId,
-              function:
-                GENERATE_FUNCTION_NAME,
-            },
-          );
-
-
-          /*
-           * =====================================
-           * Supabase Edge Function 呼び出し
-           * =====================================
-           *
-           * Edge Function側で
-           *
-           * 1. pending panel取得
-           * 2. Gemini呼び出し
-           * 3. scenes.summary 保存
-           * 4. panels.status = done
-           *
-           * を行う想定です。
-           */
-          const {
-            data,
-            error:
-              functionError,
-          } =
-            await supabase.functions.invoke(
-              GENERATE_FUNCTION_NAME,
-              {
-                body: {
-                  tripId,
-                },
-              },
-            );
-
-
-          if (functionError) {
-
-            console.error(
-              '[GeneratingScreen] Edge Function エラー',
-              functionError,
-            );
-
-
-            setError(
-              `AI生成の開始に失敗しました: ${functionError.message}`,
-            );
-
-            return;
-          }
-
-
-          console.log(
-            '[GeneratingScreen] Edge Function 応答',
-            data,
-          );
-
-        } catch (e) {
-
-          console.error(
-            '[GeneratingScreen] AI生成中にエラー',
-            e,
-          );
-
-
-          setError(
-            `AI生成中にエラーが発生しました: ${String(e)}`,
-          );
-        }
-      };
-
-
-    void startGeneration();
-
-  }, [
-    tripId,
-    loading,
-    frames,
-  ]);
-
-
-  /* =========================================================
-     3.
      panels の変更をリアルタイム受信
+
+     ★ここが重要
+
+     AI生成自体はPythonバックエンドが行います。
+
+     この画面から
+     supabase.functions.invoke()
+     は呼びません。
   ========================================================= */
 
   useEffect(() => {
@@ -479,6 +314,131 @@ React.FC<GeneratingScreenProps> = ({
 
 
     return unsubscribe;
+
+  }, [tripId]);
+
+
+  /* =========================================================
+     3.
+     Realtime が取りこぼした場合の保険として
+     定期的に panels を再取得する
+
+     PythonバックエンドがSupabaseを更新していても
+     Realtime設定などの問題で画面に反映されない場合が
+     あるため、3秒ごとに状態を確認します。
+  ========================================================= */
+
+  useEffect(() => {
+
+    if (!tripId) {
+      return;
+    }
+
+
+    let cancelled = false;
+
+
+    const refreshPanels = async () => {
+
+      try {
+
+        const panels =
+          await getPanels(tripId);
+
+
+        if (cancelled) {
+          return;
+        }
+
+
+        const byScene =
+          new Map(
+            panels.map(
+              (panel) => [
+                panel.scene_id,
+                panel,
+              ],
+            ),
+          );
+
+
+        setFrames(
+          (prev) =>
+            prev.map(
+              (frame) => {
+
+                const panel =
+                  byScene.get(
+                    frame.sceneId,
+                  );
+
+
+                if (!panel) {
+                  return frame;
+                }
+
+
+                if (
+                  panel.status ===
+                  frame.status
+                ) {
+                  return frame;
+                }
+
+
+                console.log(
+                  '[GeneratingScreen] pollingでpanel変更を検出',
+                  {
+                    sceneId:
+                      frame.sceneId,
+
+                    before:
+                      frame.status,
+
+                    after:
+                      panel.status,
+                  },
+                );
+
+
+                return {
+                  ...frame,
+
+                  status:
+                    panel.status,
+                };
+              },
+            ),
+        );
+
+      } catch (e) {
+
+        console.error(
+          '[GeneratingScreen] panels再取得失敗',
+          e,
+        );
+      }
+    };
+
+
+    const timer =
+      window.setInterval(
+        () => {
+          void refreshPanels();
+        },
+        3000,
+      );
+
+
+    return () => {
+
+      cancelled = true;
+
+      window.clearInterval(
+        timer,
+      );
+
+    };
 
   }, [tripId]);
 
@@ -612,7 +572,7 @@ React.FC<GeneratingScreenProps> = ({
     ) {
 
       setError(
-        'すべてのAI生成に失敗しました。Edge Function または Gemini API の設定を確認してください。',
+        'すべてのAI生成に失敗しました。PythonバックエンドまたはGemini APIの設定を確認してください。',
       );
 
       return;
@@ -652,15 +612,20 @@ React.FC<GeneratingScreenProps> = ({
     }
 
 
-    const timer =
-      setTimeout(
-        onComplete,
-        1200,
-      );
+    /*
+     * ★修正点
+     *
+     * setTimeout を使わず、
+     * 全コマ終了後すぐに日記画面へ進む。
+     *
+     * 以前は timeout の cleanup によって
+     * onComplete が実行されない可能性がありました。
+     */
+    console.log(
+      '[GeneratingScreen] 全コマ完了 → 日記画面へ移動',
+    );
 
-
-    return () =>
-      clearTimeout(timer);
+    onComplete();
 
   }, [
     loading,
@@ -683,15 +648,8 @@ React.FC<GeneratingScreenProps> = ({
       !loading
     ) {
 
-      const timer =
-        setTimeout(
-          onComplete,
-          800,
-        );
+      onComplete();
 
-
-      return () =>
-        clearTimeout(timer);
     }
 
   }, [
@@ -852,7 +810,6 @@ React.FC<GeneratingScreenProps> = ({
         <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden p-0.5">
 
           <div
-
             className="h-full bg-gradient-to-r from-blue-600 via-sky-400 to-teal-400 rounded-full transition-all duration-500 ease-out"
 
             style={{
@@ -892,7 +849,6 @@ React.FC<GeneratingScreenProps> = ({
               return (
 
                 <div
-
                   key={
                     frame.sceneId
                   }
@@ -964,7 +920,9 @@ React.FC<GeneratingScreenProps> = ({
                           ? 'AI補完に失敗しました'
                           : done
                             ? '写真がない時間の日記・画像が完成しました'
-                            : '写真が残っていない時間を補完しています'}
+                            : isRunning
+                              ? '写真が残っていない時間をAIが補完しています'
+                              : '写真が残っていない時間の生成を待っています'}
 
                       </>
 
@@ -978,7 +936,9 @@ React.FC<GeneratingScreenProps> = ({
                           ? '写真の日記生成に失敗しました'
                           : done
                             ? '写真の日記が完成しました'
-                            : '写真から日記を作っています'}
+                            : isRunning
+                              ? '写真から日記を作っています'
+                              : '写真の日記生成を待っています'}
 
                       </>
 
@@ -1016,7 +976,7 @@ React.FC<GeneratingScreenProps> = ({
               <p className="text-[11px] text-amber-700 text-left font-diary">
 
                 時間がかかっています。
-                AI生成処理が正常に動いているか確認してください。
+                PythonバックエンドのAI生成処理が正常に動いているか確認してください。
                 下のボタンから、できたぶんだけ先に見ることもできます。
 
               </p>

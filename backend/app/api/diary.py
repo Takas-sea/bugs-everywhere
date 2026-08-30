@@ -174,3 +174,45 @@ def analyze():
         return result
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+from pydantic import BaseModel
+
+
+class GenerateTripRequest(BaseModel):
+    tripId: str
+
+
+@router.post("/generate-trip")
+def generate_trip(request: GenerateTripRequest):
+    """
+    フロントエンドの GeneratingScreen から呼び出すAPI。
+
+    tripId に紐づく pending のコマを処理し、
+    写真の日記・AI補完シーンを生成する。
+    """
+    try:
+        trip_id = request.tripId
+
+        if not trip_id:
+            raise HTTPException(
+                status_code=400,
+                detail="tripId が必要です",
+            )
+
+        result = fill_gap_scenes_for_trip(trip_id)
+
+        return {
+            "ok": True,
+            "tripId": trip_id,
+            "result": result,
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        print("[generate-trip] ERROR:", repr(exc))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(exc),
+        ) from exc
